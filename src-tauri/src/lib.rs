@@ -1,4 +1,8 @@
 use serde::{Deserialize, Serialize};
+use sqlx::{Pool, Sqlite};
+use tauri::{Manager, State};
+
+mod db;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Landmark {
@@ -292,11 +296,161 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
     })
 }
 
+// --- Database Commands ---
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct Patient {
+    pub id: String,
+    pub name: String,
+    pub age: i64,
+}
+
+#[tauri::command]
+async fn get_patients(pool: State<'_, Pool<Sqlite>>) -> Result<Vec<Patient>, String> {
+    sqlx::query_as::<_, Patient>(
+        "SELECT id, name, age FROM patients ORDER BY created_at DESC"
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| format!("Database error: {}", e))
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PatientSummary {
+    pub id: String,
+    pub name: String,
+    pub age: i64,
+    pub latest_assessment: Option<String>,
+    pub latest_score: Option<f64>,
+    pub latest_risk: Option<String>,
+}
+
+#[tauri::command]
+async fn get_patient_summaries(pool: State<'_, Pool<Sqlite>>) -> Result<Vec<PatientSummary>, String> {
+    sqlx::query_as::<_, PatientSummary>(
+        r#"
+        SELECT 
+            p.id, 
+            p.name, 
+            p.age, 
+            strftime('%Y-%m-%d', MAX(a.created_at)) as latest_assessment,
+            (SELECT overall_score FROM assessments WHERE patient_id = p.id ORDER BY created_at DESC LIMIT 1) as latest_score,
+            (SELECT risk_level FROM assessments WHERE patient_id = p.id ORDER BY created_at DESC LIMIT 1) as latest_risk
+        FROM patients p
+        LEFT JOIN assessments a ON p.id = a.patient_id
+        GROUP BY p.id
+        ORDER BY p.name ASC
+        "#
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| format!("Database error: {}", e))
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssessmentHistory {
+    pub date: String,
+    pub score: f64,
+}
+
+#[tauri::command]
+async fn get_assessment_history(
+    patient_id: String,
+    pool: State<'_, Pool<Sqlite>>,
+) -> Result<Vec<AssessmentHistory>, String> {
+    // Return date as YYYY-MM-DD for simple string charting
+    let records: Vec<(String, f64)> = sqlx::query_as(
+        r#"
+        SELECT strftime('%Y-%m-%d', created_at) as date, overall_score 
+        FROM assessments 
+        WHERE patient_id = ? 
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(patient_id)
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(records
+        .into_iter()
+        .map(|(date, score)| AssessmentHistory { date, score })
+        .collect())
+}
+
+#[tauri::command]
+async fn save_assessment(
+    id: String,
+    patient_id: String,
+    score: f64,
+    risk_level: String,
+    pool: State<'_, Pool<Sqlite>>,
+) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO assessments (id, patient_id, overall_score, risk_level) VALUES (?, ?, ?, ?)"
+    )
+    .bind(id)
+    .bind(patient_id)
+    .bind(score)
+    .bind(risk_level)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn save_assessment_frame(
+    assessment_id: String,
+    step_id: u8,
+    timestamp_ms: i64,
+    landmarks: Vec<Landmark>,
+    pool: State<'_, Pool<Sqlite>>,
+) -> Result<(), String> {
+    let landmarks_json = serde_json::to_string(&landmarks).map_err(|e| e.to_string())?;
+    sqlx::query(
+        "INSERT INTO assessment_frames (assessment_id, step_id, timestamp_ms, landmarks_json) VALUES (?, ?, ?, ?)"
+    )
+    .bind(assessment_id)
+    .bind(step_id)
+    .bind(timestamp_ms)
+    .bind(landmarks_json)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![calculate_posture])
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match db::init_db(&app_handle).await {
+                    Ok(pool) => {
+                        app_handle.manage(pool);
+                        println!("Database initialized successfully.");
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to initialize database: {}", e);
+                    }
+                }
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            calculate_posture,
+            get_patients,
+            get_patient_summaries,
+            get_assessment_history,
+            save_assessment,
+            save_assessment_frame
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

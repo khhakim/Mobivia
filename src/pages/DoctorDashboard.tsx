@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
     Users, Activity, FileText, Settings, Video, Download, CheckCircle, AlertTriangle, XCircle, Play, Pause, FastForward, Rewind, LogOut
 } from 'lucide-react';
@@ -8,22 +8,23 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import { invoke } from '@tauri-apps/api/core';
 
-// Mock Patient Data
-const PATIENT = {
+// Mock fallback if DB is empty
+const MOCK_PATIENT = {
     name: "Margaret T.",
     age: 72,
-    lastAssessment: "March 7, 2026",
-    score: 68,
-    risk: "Moderate"
+    latest_assessment: "March 7, 2026",
+    latest_score: 68,
+    latest_risk: "Moderate",
+    id: "MBV-8821"
 };
 
-const TREND_DATA = [
+const MOCK_TREND_DATA = [
     { date: 'Jan 10', score: 75 },
     { date: 'Jan 24', score: 72 },
     { date: 'Feb 05', score: 65 },
-    { date: 'Feb 19', score: 60 },
-    { date: 'Mar 07', score: 68 }, // Current
+    { date: 'Feb 19', score: 60 }
 ];
 
 const ASSESSMENT_STEPS = [
@@ -234,6 +235,70 @@ export default function DoctorDashboard() {
     // Placeholder for loading historic patient landamark data
     const [patientLandmarks] = useState<Landmark[] | null>(null);
 
+    interface PatientSummary {
+        id: string;
+        name: string;
+        age: number;
+        latest_assessment: string | null;
+        latest_score: number | null;
+        latest_risk: string | null;
+    }
+
+    const [patients, setPatients] = useState<PatientSummary[]>([]);
+    const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchPatients = async () => {
+            try {
+                const fetched: PatientSummary[] = await invoke('get_patient_summaries');
+                setPatients(fetched);
+                if (fetched.length > 0 && !selectedPatientId) {
+                    setSelectedPatientId(fetched[0].id);
+                }
+            } catch (err) {
+                console.error("Failed to load patients", err);
+            }
+        };
+        fetchPatients();
+    }, []);
+
+    const selectedPatient = patients.find(p => p.id === selectedPatientId);
+    const displayPatient = selectedPatient || MOCK_PATIENT;
+
+    const [trendData, setTrendData] = useState<{ date: string, score: number }[]>(MOCK_TREND_DATA);
+
+    useEffect(() => {
+        if (!selectedPatientId) return;
+
+        const fetchHistory = async () => {
+            try {
+                const history: { date: string, score: number }[] = await invoke('get_assessment_history', {
+                    patientId: selectedPatientId
+                });
+
+                if (history && history.length > 0) {
+                    setTrendData(() => {
+                        // Keep some mock past data for visual effect if DB is mostly empty
+                        if (history.length < 3) {
+                            return [...MOCK_TREND_DATA, ...history.map(h => ({
+                                date: new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                                score: Math.round(h.score)
+                            }))];
+                        }
+
+                        return history.map(h => ({
+                            date: new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                            score: Math.round(h.score)
+                        }));
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to load history from DB", err);
+            }
+        };
+        fetchHistory();
+    }, [selectedPatientId]);
+
 
 
     return (
@@ -250,32 +315,46 @@ export default function DoctorDashboard() {
 
                 {/* Patient Summary Card */}
                 <div className="m-4 bg-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm">
-                    <div className="flex items-center space-x-3 mb-4">
-                        <div className="w-12 h-12 rounded-full bg-sky-100 flex items-center justify-center text-sky-700 font-bold text-lg border-2 border-white shadow-sm">
-                            {PATIENT.name.split(' ').map(n => n[0]).join('')}
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center space-x-3">
+                            <div className="w-12 h-12 rounded-full bg-sky-100 flex items-center justify-center text-sky-700 font-bold text-lg border-2 border-white shadow-sm">
+                                {displayPatient.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900 leading-tight">{displayPatient.name}</h3>
+                                <p className="text-xs text-slate-500">Age {displayPatient.age} • ID: {displayPatient.id.substring(0, 8)}</p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="font-bold text-slate-900 leading-tight">{PATIENT.name}</h3>
-                            <p className="text-xs text-slate-500">Age {PATIENT.age} • ID: MBV-8821</p>
-                        </div>
+
+                        {/* Dropdown to select patient */}
+                        <select
+                            className="bg-white border border-slate-200 text-xs rounded px-2 py-1 text-slate-700"
+                            value={selectedPatientId || ""}
+                            onChange={(e) => setSelectedPatientId(e.target.value)}
+                        >
+                            {patients.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 mb-3">
                         <div className="bg-white p-2 rounded-xl border border-slate-100">
                             <span className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Latest Score</span>
-                            <span className="text-lg font-bold text-amber-600">{PATIENT.score}/100</span>
+                            <span className="text-lg font-bold text-amber-600">
+                                {displayPatient.latest_score !== null ? Math.round(displayPatient.latest_score) : '--'}/100
+                            </span>
                         </div>
                         <div className="bg-white p-2 rounded-xl border border-slate-100">
                             <span className="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Risk Level</span>
                             <span className="text-sm font-bold text-amber-600 mt-1 flex items-center">
-                                <AlertTriangle size={14} className="mr-1" /> {PATIENT.risk}
+                                <AlertTriangle size={14} className="mr-1" /> {displayPatient.latest_risk || 'N/A'}
                             </span>
                         </div>
                     </div>
 
                     <div className="text-[10px] text-slate-400 flex justify-between items-center px-1">
-                        <span>Assessed: {PATIENT.lastAssessment}</span>
-                        <button className="text-sky-600 font-medium hover:underline">Change</button>
+                        <span>Assessed: {displayPatient.latest_assessment || 'Never'}</span>
                     </div>
                 </div>
 
@@ -494,7 +573,9 @@ export default function DoctorDashboard() {
 
                             <div className="flex justify-between items-start relative z-10">
                                 <div>
-                                    <span className="text-4xl font-black text-amber-600 tracking-tighter shadow-sm">{PATIENT.score}</span>
+                                    <span className="text-4xl font-black text-amber-600 tracking-tighter shadow-sm">
+                                        {displayPatient.latest_score !== null ? Math.round(displayPatient.latest_score) : '--'}
+                                    </span>
                                     <span className="text-sm font-bold text-amber-800 ml-1">/100</span>
                                 </div>
                                 <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-lg border border-amber-200 shadow-sm">
@@ -531,7 +612,7 @@ export default function DoctorDashboard() {
 
                         <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm h-48 w-full">
                             <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={TREND_DATA} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                                <LineChart data={trendData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={5} />
                                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                                     <Tooltip
