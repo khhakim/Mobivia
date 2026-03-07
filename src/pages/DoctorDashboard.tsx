@@ -4,9 +4,12 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Peer, { MediaConnection } from "peerjs";
+import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import { Landmark } from "../components/VisionEngine";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Grid, Environment } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, Grid, Environment, useGLTF } from '@react-three/drei';
+import * as THREE from 'three';
 
 // Mock Patient Data
 const PATIENT = {
@@ -86,45 +89,140 @@ const MetricBar = ({ label, value, optimal, unit }: { label: string, value: numb
     );
 };
 
-// Simple skeleton representation placeholder
-const SkeletonModel = () => {
+// Custom 3D Human Model with Biomechanical Mapping
+const CustomModel = ({ landmarks }: { landmarks?: Landmark[] | null }) => {
+    // Load the custom low-poly model from the public folder
+    const { scene } = useGLTF('/human_model.glb');
+
+    const initialLocalQuats = useRef<Record<string, THREE.Quaternion>>({});
+
+    // In a real application, landmarks would be streamed via WebRTC or global state from VisionEngine
+    // Here we implement the bone mapping logic to run on every 3D frame.
+    useFrame(({ clock }) => {
+        // One-time initialization of T-pose local quaternions
+        if (Object.keys(initialLocalQuats.current).length === 0) {
+            scene.traverse((obj) => {
+                initialLocalQuats.current[obj.name] = obj.quaternion.clone();
+            });
+        }
+
+        const getBone = (name: string) =>
+            scene.getObjectByName(`mixamorig:${name}`) ||
+            scene.getObjectByName(`mixamorig${name}`) ||
+            scene.getObjectByName(name);
+
+        const bonesToTrack = [
+            { name: 'LeftUpLeg', child: 'LeftLeg', startIdx: 23, endIdx: 25 },
+            { name: 'LeftLeg', child: 'LeftFoot', startIdx: 25, endIdx: 27 },
+            { name: 'RightUpLeg', child: 'RightLeg', startIdx: 24, endIdx: 26 },
+            { name: 'RightLeg', child: 'RightFoot', startIdx: 26, endIdx: 28 },
+            { name: 'LeftArm', child: 'LeftForeArm', startIdx: 11, endIdx: 13 },
+            { name: 'LeftForeArm', child: 'LeftHand', startIdx: 13, endIdx: 15 },
+            { name: 'RightArm', child: 'RightForeArm', startIdx: 12, endIdx: 14 },
+            { name: 'RightForeArm', child: 'RightHand', startIdx: 14, endIdx: 16 },
+        ];
+
+        // If we have live tracking data from the patient camera!
+        if (landmarks && landmarks.length >= 33) {
+
+            // Helper to convert MediaPipe coords to standard 3D scene space
+            // Flips Y and Z to match Three.js coordinate system
+            const getPoint = (i: number) => new THREE.Vector3(
+                (landmarks[i].x - 0.5) * 2, // Fixed X inversion and applied scaling
+                -(landmarks[i].y - 0.5) * 2,
+                -landmarks[i].z * 2
+            );
+
+            // 1. Spine Mapping (Shoulders to Hips)
+            const spine = getBone('Spine');
+            const spineTop = getBone('Spine1') || getBone('Spine2') || getBone('Neck');
+            if (spine && spineTop && initialLocalQuats.current[spine.name]) {
+                const currentQuat = spine.quaternion.clone();
+                spine.quaternion.copy(initialLocalQuats.current[spine.name]);
+                spine.updateMatrixWorld(true);
+
+                const p1 = new THREE.Vector3().setFromMatrixPosition(spine.matrixWorld);
+                const p2 = new THREE.Vector3().setFromMatrixPosition(spineTop.matrixWorld);
+                const dirCurrent = p2.sub(p1).normalize();
+
+                const hipsMP = getPoint(23).add(getPoint(24)).multiplyScalar(0.5);
+                const shouldersMP = getPoint(11).add(getPoint(12)).multiplyScalar(0.5);
+                const targetVec = shouldersMP.sub(hipsMP);
+
+                // Dampen the Z-axis for the spine to prevent excessive forward/backward leaning from 2D camera perspective
+                targetVec.z *= 0.3;
+
+                if (targetVec.lengthSq() > 0.0001) {
+                    const dirTarget = targetVec.normalize();
+                    const qDeltaWorld = new THREE.Quaternion().setFromUnitVectors(dirCurrent, dirTarget);
+                    const parentQuat = new THREE.Quaternion();
+                    if (spine.parent) spine.parent.getWorldQuaternion(parentQuat);
+                    const qLocalDelta = parentQuat.clone().invert().multiply(qDeltaWorld).multiply(parentQuat);
+
+                    spine.quaternion.premultiply(qLocalDelta);
+                    const fullTargetLocal = spine.quaternion.clone();
+                    spine.quaternion.copy(currentQuat).slerp(fullTargetLocal, 0.2);
+                }
+                spine.updateMatrixWorld(true);
+            }
+
+            // 2. Limbs Mapping
+            bonesToTrack.forEach(cfg => {
+                const b = getBone(cfg.name);
+                const child = getBone(cfg.child);
+                if (b && child && initialLocalQuats.current[b.name]) {
+                    const currentQuat = b.quaternion.clone();
+                    b.quaternion.copy(initialLocalQuats.current[b.name]);
+                    b.updateMatrixWorld(true);
+
+                    const p1 = new THREE.Vector3().setFromMatrixPosition(b.matrixWorld);
+                    const p2 = new THREE.Vector3().setFromMatrixPosition(child.matrixWorld);
+                    const dirCurrent = p2.sub(p1).normalize();
+
+                    const mp1 = getPoint(cfg.startIdx);
+                    const mp2 = getPoint(cfg.endIdx);
+                    const targetVec = mp2.sub(mp1);
+
+                    if (targetVec.lengthSq() > 0.0001) {
+                        const dirTarget = targetVec.normalize();
+                        const qDeltaWorld = new THREE.Quaternion().setFromUnitVectors(dirCurrent, dirTarget);
+
+                        const parentQuat = new THREE.Quaternion();
+                        if (b.parent) b.parent.getWorldQuaternion(parentQuat);
+                        const qLocalDelta = parentQuat.clone().invert().multiply(qDeltaWorld).multiply(parentQuat);
+
+                        b.quaternion.premultiply(qLocalDelta);
+                        const fullTargetLocal = b.quaternion.clone();
+
+                        b.quaternion.copy(currentQuat).slerp(fullTargetLocal, 0.2);
+                    }
+                    b.updateMatrixWorld(true);
+                }
+            });
+
+        } else {
+            // Idle animation if no patient tracking data is available yet
+            const t = clock.getElapsedTime();
+            const leftArm = getBone('LeftArm');
+            if (leftArm && initialLocalQuats.current[leftArm.name]) {
+                const currentQuat = leftArm.quaternion.clone();
+                // Slerp from default initial resting pose
+                const idleTarget = initialLocalQuats.current[leftArm.name].clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, Math.sin(t) * 0.1)));
+                leftArm.quaternion.copy(currentQuat).slerp(idleTarget, 0.05);
+            }
+        }
+    });
+
+    // Scale and position might need adjustments depending on the model's export settings
     return (
         <group position={[0, -1, 0]}>
-            {/* Simple abstracted human form */}
-            <mesh position={[0, 2, 0]}>
-                <sphereGeometry args={[0.2, 32, 32]} />
-                <meshStandardMaterial color="#64748b" />
-            </mesh>
-            <mesh position={[0, 1.2, 0]}>
-                <cylinderGeometry args={[0.1, 0.1, 1.2, 32]} />
-                <meshStandardMaterial color="#94a3b8" />
-            </mesh>
-            {/* Shoulders */}
-            <mesh position={[0, 1.7, 0]} rotation={[0, 0, Math.PI / 2]}>
-                <cylinderGeometry args={[0.08, 0.08, 0.8, 32]} />
-                <meshStandardMaterial color="#94a3b8" />
-            </mesh>
-            {/* Arms */}
-            <mesh position={[-0.4, 1.2, 0]}>
-                <cylinderGeometry args={[0.06, 0.06, 1, 32]} />
-                <meshStandardMaterial color="#cbd5e1" />
-            </mesh>
-            <mesh position={[0.4, 1.2, 0]}>
-                <cylinderGeometry args={[0.06, 0.06, 1, 32]} />
-                <meshStandardMaterial color="#cbd5e1" />
-            </mesh>
-            {/* Legs */}
-            <mesh position={[-0.2, 0.3, 0]}>
-                <cylinderGeometry args={[0.08, 0.08, 1, 32]} />
-                <meshStandardMaterial color="#cbd5e1" />
-            </mesh>
-            <mesh position={[0.2, 0.3, 0]}>
-                <cylinderGeometry args={[0.08, 0.08, 1, 32]} />
-                <meshStandardMaterial color="#cbd5e1" />
-            </mesh>
+            <primitive object={scene} scale={[50, 50, 50]} position={[0, 0, 0]} />
         </group>
-    )
-}
+    );
+};
+
+// Preload the model
+useGLTF.preload('/human_model.glb');
 
 
 export default function DoctorDashboard() {
@@ -145,24 +243,60 @@ export default function DoctorDashboard() {
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    const [patientLandmarks, setPatientLandmarks] = useState<Landmark[] | null>(null);
 
-    // Initialize Telehealth Peer only when modal opens
+    // Initialize Telehealth Peer and MediaPipe only when modal opens
     useEffect(() => {
-        if (isTelehealthModalOpen && !peerInstance.current) {
-            const peer = new Peer();
-            peerInstance.current = peer;
+        let poseLandmarker: PoseLandmarker | null = null;
+        let animationFrameId: number;
 
-            // Auto-get camera for Doctor
-            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-                .then((stream) => {
-                    setLocalStream(stream);
-                })
-                .catch((err) => {
-                    console.error("Failed to get local stream", err);
-                    setTelehealthStatus('error');
+        if (isTelehealthModalOpen) {
+            // 1. Setup Peer
+            if (!peerInstance.current) {
+                const peer = new Peer();
+                peerInstance.current = peer;
+
+                navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                    .then((stream) => setLocalStream(stream))
+                    .catch((err) => {
+                        console.error("Failed to get local stream", err);
+                        setTelehealthStatus('error');
+                    });
+            }
+
+            // 2. Setup AI Vision tracking for the patient's remote video feed
+            const initAI = async () => {
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
+                poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numPoses: 1
                 });
+            };
+            initAI();
+
+            // 3. Process loop for the incoming patient video feed
+            const trackPatient = () => {
+                if (remoteVideoRef.current && poseLandmarker && remoteStream && remoteVideoRef.current.readyState >= 2) {
+                    const results = poseLandmarker.detectForVideo(remoteVideoRef.current, performance.now());
+                    if (results.landmarks && results.landmarks.length > 0) {
+                        setPatientLandmarks(results.landmarks[0]);
+                    }
+                }
+                animationFrameId = requestAnimationFrame(trackPatient);
+            };
+            trackPatient();
+
         }
-    }, [isTelehealthModalOpen]);
+
+        return () => {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (poseLandmarker) poseLandmarker.close();
+        }
+    }, [isTelehealthModalOpen, remoteStream]);
 
     // Attach streams when available
     useEffect(() => {
@@ -334,7 +468,7 @@ export default function DoctorDashboard() {
                             <ambientLight intensity={0.5} />
                             <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
 
-                            {showSkeleton && <SkeletonModel />}
+                            {showSkeleton && <CustomModel landmarks={patientLandmarks} />}
 
                             {/* Grid Floor */}
                             <Grid infiniteGrid fadeDistance={20} sectionColor="#cbd5e1" cellColor="#e2e8f0" position={[0, -1, 0]} />
