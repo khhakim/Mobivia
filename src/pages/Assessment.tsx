@@ -51,8 +51,14 @@ export default function Assessment() {
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const peerInstance = useRef<Peer | null>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    const localStreamRef = useRef<MediaStream | null>(null);
 
-    // Initialize PeerJS
+    // Keep stream ref up to date for the Peer event callbacks
+    useEffect(() => {
+        localStreamRef.current = localStream;
+    }, [localStream]);
+
+    // Initialize PeerJS ONCE
     useEffect(() => {
         const peer = new Peer();
 
@@ -62,11 +68,16 @@ export default function Assessment() {
 
         peer.on('call', (call: MediaConnection) => {
             // Auto-answer the call if we have our vision stream ready
-            if (localStream) {
-                call.answer(localStream);
+            if (localStreamRef.current) {
+                call.answer(localStreamRef.current);
                 call.on('stream', (remoteStream) => {
                     setRemoteStream(remoteStream);
                 });
+                call.on('close', () => {
+                    setRemoteStream(null);
+                });
+            } else {
+                console.warn('Received call but local stream is not ready.');
             }
         });
 
@@ -75,7 +86,7 @@ export default function Assessment() {
         return () => {
             peer.destroy();
         };
-    }, [localStream]);
+    }, []);
 
     // Attach remote stream to video element when it arrives
     useEffect(() => {

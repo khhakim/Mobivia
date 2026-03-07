@@ -1,10 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
-    Users, Activity, FileText, Settings, Video, Download, CheckCircle, AlertTriangle, XCircle, Play, Pause, FastForward, Rewind, LogOut, Phone, PhoneOff
+    Users, Activity, FileText, Settings, Video, Download, CheckCircle, AlertTriangle, XCircle, Play, Pause, FastForward, Rewind, LogOut
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import Peer, { MediaConnection } from "peerjs";
-import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import { Link, useNavigate } from 'react-router-dom';
 import { Landmark } from "../components/VisionEngine";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { Canvas, useFrame } from '@react-three/fiber';
@@ -226,135 +224,17 @@ useGLTF.preload('/human_model.glb');
 
 
 export default function DoctorDashboard() {
+    const navigate = useNavigate();
     const [activeStep, setActiveStep] = useState(2); // Start with 'Sitting Upright' to show data
     const [isPlaying, setIsPlaying] = useState(false);
     const [showSkeleton, setShowSkeleton] = useState(true);
     const [showAngles, setShowAngles] = useState(true);
     const [showAxis, setShowAxis] = useState(false);
 
-    // Telehealth State
-    const [isTelehealthModalOpen, setIsTelehealthModalOpen] = useState(false);
-    const [patientTelehealthId, setPatientTelehealthId] = useState('');
-    const [telehealthStatus, setTelehealthStatus] = useState<'idle' | 'calling' | 'connected' | 'error'>('idle');
-    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-    const peerInstance = useRef<Peer | null>(null);
-    const currentCall = useRef<MediaConnection | null>(null);
+    // Placeholder for loading historic patient landamark data
+    const [patientLandmarks] = useState<Landmark[] | null>(null);
 
-    const localVideoRef = useRef<HTMLVideoElement>(null);
-    const remoteVideoRef = useRef<HTMLVideoElement>(null);
-    const [patientLandmarks, setPatientLandmarks] = useState<Landmark[] | null>(null);
 
-    // Initialize Telehealth Peer and MediaPipe only when modal opens
-    useEffect(() => {
-        let poseLandmarker: PoseLandmarker | null = null;
-        let animationFrameId: number;
-
-        if (isTelehealthModalOpen) {
-            // 1. Setup Peer
-            if (!peerInstance.current) {
-                const peer = new Peer();
-                peerInstance.current = peer;
-
-                navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-                    .then((stream) => setLocalStream(stream))
-                    .catch((err) => {
-                        console.error("Failed to get local stream", err);
-                        setTelehealthStatus('error');
-                    });
-            }
-
-            // 2. Setup AI Vision tracking for the patient's remote video feed
-            const initAI = async () => {
-                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
-                poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-                    baseOptions: {
-                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-                        delegate: "GPU"
-                    },
-                    runningMode: "VIDEO",
-                    numPoses: 1
-                });
-            };
-            initAI();
-
-            // 3. Process loop for the incoming patient video feed
-            const trackPatient = () => {
-                if (remoteVideoRef.current && poseLandmarker && remoteStream && remoteVideoRef.current.readyState >= 2) {
-                    const results = poseLandmarker.detectForVideo(remoteVideoRef.current, performance.now());
-                    if (results.landmarks && results.landmarks.length > 0) {
-                        setPatientLandmarks(results.landmarks[0]);
-                    }
-                }
-                animationFrameId = requestAnimationFrame(trackPatient);
-            };
-            trackPatient();
-
-        }
-
-        return () => {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            if (poseLandmarker) poseLandmarker.close();
-        }
-    }, [isTelehealthModalOpen, remoteStream]);
-
-    // Attach streams when available
-    useEffect(() => {
-        if (localVideoRef.current && localStream) {
-            localVideoRef.current.srcObject = localStream;
-        }
-    }, [localStream, isTelehealthModalOpen]);
-
-    useEffect(() => {
-        if (remoteVideoRef.current && remoteStream) {
-            remoteVideoRef.current.srcObject = remoteStream;
-        }
-    }, [remoteStream]);
-
-    const handleCallPatient = () => {
-        if (!peerInstance.current || !localStream || !patientTelehealthId) return;
-
-        setTelehealthStatus('calling');
-        const call = peerInstance.current.call(patientTelehealthId, localStream);
-
-        call.on('stream', (userVideoStream) => {
-            setRemoteStream(userVideoStream);
-            setTelehealthStatus('connected');
-        });
-
-        call.on('close', () => {
-            handleEndCall();
-        });
-
-        call.on('error', (err) => {
-            console.error(err);
-            setTelehealthStatus('error');
-        });
-
-        currentCall.current = call;
-    };
-
-    const handleEndCall = () => {
-        if (currentCall.current) {
-            currentCall.current.close();
-            currentCall.current = null;
-        }
-        setRemoteStream(null);
-        setTelehealthStatus('idle');
-    };
-
-    const handleCloseTelehealth = () => {
-        handleEndCall();
-        if (localStream) {
-            localStream.getTracks().forEach(track => track.stop());
-            setLocalStream(null);
-        }
-        if (peerInstance.current) {
-            peerInstance.current.destroy();
-            peerInstance.current = null;
-        }
-        setIsTelehealthModalOpen(false);
-    }
 
     return (
         <div className="min-h-screen bg-[#f8fafc] flex font-sans text-slate-900 overflow-hidden">
@@ -416,8 +296,8 @@ export default function DoctorDashboard() {
 
                     <span className="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 mt-6 block">Actions</span>
                     <button
-                        onClick={() => setIsTelehealthModalOpen(true)}
-                        className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl font-medium transition-colors ${telehealthStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'text-slate-600 hover:bg-slate-50'}`}
+                        onClick={() => navigate('/doctor-telehealth')}
+                        className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl font-medium transition-colors text-slate-600 hover:bg-slate-50`}
                     >
                         <Video size={18} />
                         <span className="text-sm">Telehealth Consult</span>
@@ -461,112 +341,50 @@ export default function DoctorDashboard() {
                 {/* 3D Canvas Area */}
                 <div className="flex-1 relative bg-slate-100 overflow-hidden border-b border-slate-200 flex flex-col shadow-inner">
 
-                    {/* Canvas Viewport */}
-                    <div className="flex-1 relative cursor-grab active:cursor-grabbing">
-                        <Canvas camera={{ position: [0, 1, 4], fov: 50 }}>
-                            <color attach="background" args={['#f1f5f9']} />
-                            <ambientLight intensity={0.5} />
-                            <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
+                    {/* Main Split View */}
+                    <div className="flex-1 flex flex-row w-full h-full relative">
 
-                            {showSkeleton && <CustomModel landmarks={patientLandmarks} />}
 
-                            {/* Grid Floor */}
-                            <Grid infiniteGrid fadeDistance={20} sectionColor="#cbd5e1" cellColor="#e2e8f0" position={[0, -1, 0]} />
-                            <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
-                            <Environment preset="city" />
-                        </Canvas>
 
-                        {/* Overlay HUD Controls */}
-                        <div className="absolute top-4 right-4 flex flex-col gap-2">
-                            <button onClick={() => setShowSkeleton(!showSkeleton)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border backdrop-blur-md transition-all ${showSkeleton ? 'bg-sky-600/90 text-white border-sky-500 shadow-md' : 'bg-white/80 text-slate-600 border-slate-300'}`}>
-                                Skeleton
-                            </button>
-                            <button onClick={() => setShowAngles(!showAngles)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border backdrop-blur-md transition-all ${showAngles ? 'bg-sky-600/90 text-white border-sky-500 shadow-md' : 'bg-white/80 text-slate-600 border-slate-300'}`}>
-                                Joint Angles
-                            </button>
-                            <button onClick={() => setShowAxis(!showAxis)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border backdrop-blur-md transition-all ${showAxis ? 'bg-sky-600/90 text-white border-sky-500 shadow-md' : 'bg-white/80 text-slate-600 border-slate-300'}`}>
-                                Balance Axis
-                            </button>
-                        </div>
+                        {/* Canvas Viewport (Right Side or Full) */}
+                        <div className="flex-1 relative cursor-grab active:cursor-grabbing w-full h-full">
+                            <Canvas camera={{ position: [0, 1, 4], fov: 50 }}>
+                                <color attach="background" args={['#f1f5f9']} />
+                                <ambientLight intensity={0.5} />
+                                <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
 
-                        {/* Current Step Overlay Tag */}
-                        <div className="absolute top-4 left-4">
-                            <div className="bg-white/90 backdrop-blur-sm border border-slate-200 shadow-sm rounded-xl py-2 px-4 inline-block">
-                                <span className="text-[10px] font-bold text-sky-600 uppercase tracking-widest block mb-0.5">Capturing Step {activeStep}</span>
-                                <span className="text-lg font-bold text-slate-800">{ASSESSMENT_STEPS[activeStep - 1].title}</span>
+                                {showSkeleton && <CustomModel landmarks={patientLandmarks} />}
+
+                                {/* Grid Floor */}
+                                <Grid infiniteGrid fadeDistance={20} sectionColor="#cbd5e1" cellColor="#e2e8f0" position={[0, -1, 0]} />
+                                <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
+                                <Environment preset="city" />
+                            </Canvas>
+
+                            {/* Overlay HUD Controls */}
+                            <div className="absolute top-4 right-4 flex flex-col gap-2">
+                                <button onClick={() => setShowSkeleton(!showSkeleton)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border backdrop-blur-md transition-all ${showSkeleton ? 'bg-sky-600/90 text-white border-sky-500 shadow-md' : 'bg-white/80 text-slate-600 border-slate-300'}`}>
+                                    Skeleton
+                                </button>
+                                <button onClick={() => setShowAngles(!showAngles)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border backdrop-blur-md transition-all ${showAngles ? 'bg-sky-600/90 text-white border-sky-500 shadow-md' : 'bg-white/80 text-slate-600 border-slate-300'}`}>
+                                    Joint Angles
+                                </button>
+                                <button onClick={() => setShowAxis(!showAxis)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border backdrop-blur-md transition-all ${showAxis ? 'bg-sky-600/90 text-white border-sky-500 shadow-md' : 'bg-white/80 text-slate-600 border-slate-300'}`}>
+                                    Balance Axis
+                                </button>
                             </div>
-                        </div>
 
-                        {/* Telehealth Overlay Container */}
-                        {isTelehealthModalOpen && (
-                            <div className="absolute right-4 bottom-4 w-72 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col z-50">
-                                {/* Header */}
-                                <div className="bg-slate-900 text-white p-3 flex justify-between items-center">
-                                    <div className="flex items-center space-x-2">
-                                        <div className={`w-2 h-2 rounded-full ${telehealthStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></div>
-                                        <span className="text-xs font-bold tracking-wider">LIVE TELEHEALTH</span>
-                                    </div>
-                                    <button onClick={handleCloseTelehealth} className="text-slate-400 hover:text-white transition-colors">
-                                        <XCircle size={16} />
-                                    </button>
+                            {/* Current Step Overlay Tag */}
+                            <div className="absolute top-4 left-4">
+                                <div className="bg-white/90 backdrop-blur-sm border border-slate-200 shadow-sm rounded-xl py-2 px-4 inline-block">
+                                    <span className="text-[10px] font-bold text-sky-600 uppercase tracking-widest block mb-0.5">Capturing Step {activeStep}</span>
+                                    <span className="text-lg font-bold text-slate-800">{ASSESSMENT_STEPS[activeStep - 1].title}</span>
                                 </div>
-
-                                {/* Connection UI */}
-                                {telehealthStatus === 'idle' || telehealthStatus === 'error' ? (
-                                    <div className="p-4">
-                                        <label className="text-xs font-bold text-slate-600 mb-1 block">Patient Telehealth ID</label>
-                                        <div className="flex space-x-2">
-                                            <input
-                                                type="text"
-                                                value={patientTelehealthId}
-                                                onChange={(e) => setPatientTelehealthId(e.target.value)}
-                                                placeholder="Enter ID..."
-                                                className="flex-1 border border-slate-300 rounded-lg px-2 text-sm focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
-                                            />
-                                            <button
-                                                onClick={handleCallPatient}
-                                                className="bg-sky-600 hover:bg-sky-700 text-white rounded-lg p-2 transition-colors"
-                                            >
-                                                <Phone size={16} />
-                                            </button>
-                                        </div>
-                                        {telehealthStatus === 'error' && <span className="text-[10px] text-red-500 font-medium mt-1 block">Connection failed. Check ID.</span>}
-                                    </div>
-                                ) : (
-                                    <>
-                                        {/* Remote Stream View (Patient) */}
-                                        <div className="relative w-full aspect-video bg-black flex items-center justify-center">
-                                            {remoteStream ? (
-                                                <video
-                                                    ref={remoteVideoRef}
-                                                    className="w-full h-full object-cover"
-                                                    autoPlay
-                                                    playsInline
-                                                />
-                                            ) : (
-                                                <span className="text-white/50 text-xs font-medium animate-pulse">Connecting to Patient...</span>
-                                            )}
-                                        </div>
-
-                                        {/* Call Controls */}
-                                        <div className="bg-slate-50 p-2 flex justify-center space-x-4 border-t border-slate-100 relative">
-                                            {/* Local PiP */}
-                                            <div className="absolute left-2 bottom-full mb-2 w-20 aspect-video bg-slate-800 rounded shadow border border-white/20 overflow-hidden">
-                                                <video ref={localVideoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
-                                            </div>
-
-                                            <button
-                                                onClick={handleEndCall}
-                                                className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-full text-xs font-bold flex items-center shadow-sm transition-colors"
-                                            >
-                                                <PhoneOff size={14} className="mr-1.5" /> End Consult
-                                            </button>
-                                        </div>
-                                    </>
-                                )}
                             </div>
-                        )}
-                    </div>
+
+
+                        </div>
+                    </div> {/* Close Main Split View */}
 
                     {/* Replay Controls Panel */}
                     <div className="h-16 bg-white border-t border-slate-200 px-6 flex items-center justify-between shadow-[0_-4px_10px_rgba(0,0,0,0.02)] z-10">

@@ -7,6 +7,7 @@ import Progress from "./pages/Progress";
 import Exercises from "./pages/Exercises";
 import Profile from "./pages/Profile";
 import DoctorDashboard from "./pages/DoctorDashboard";
+import TelehealthConsultation from "./pages/TelehealthConsultation";
 import "./App.css";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
         <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
+        <Route path="/doctor-telehealth" element={<TelehealthConsultation />} />
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route path="" element={<Navigate to="home" replace />} />
           <Route path="home" element={<Home />} />
