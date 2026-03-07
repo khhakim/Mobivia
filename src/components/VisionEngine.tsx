@@ -19,6 +19,12 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isInitializing, setIsInitializing] = useState(true);
 
+    // Track the latest callback without triggering re-initializations of the heavy AI model
+    const onPoseDetectedRef = useRef(onPoseDetected);
+    useEffect(() => {
+        onPoseDetectedRef.current = onPoseDetected;
+    }, [onPoseDetected]);
+
     useEffect(() => {
         let poseLandmarker: PoseLandmarker | null = null;
         let camera: Camera | null = null;
@@ -54,7 +60,7 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
                                     const landmarks = results.landmarks[0];
 
                                     // Forward structural data to our Rust Tauri Backend
-                                    onPoseDetected(landmarks);
+                                    onPoseDetectedRef.current(landmarks);
 
                                     // Visual Rendering Logic (Draw skeleton on canvas)
                                     drawJointsOnCanvas(landmarks, videoElement.videoWidth, videoElement.videoHeight);
@@ -88,7 +94,7 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
             if (camera) camera.stop();
             if (poseLandmarker) poseLandmarker.close();
         };
-    }, [onPoseDetected]);
+    }, []);
 
     // Basic rendering logic to plot joints and connect bones
     function drawJointsOnCanvas(landmarks: Landmark[], width: number, height: number) {

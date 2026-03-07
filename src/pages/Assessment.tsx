@@ -43,6 +43,28 @@ export default function Assessment() {
     const [timer, setTimer] = useState<number>(0);
     const [phase, setPhase] = useState<'idle' | 'prepare' | 'capture' | 'complete'>('idle');
 
+    const [assessmentId, setAssessmentId] = useState<string>('');
+    const assessmentIdRef = useRef<string>('');
+    useEffect(() => { assessmentIdRef.current = assessmentId; }, [assessmentId]);
+
+    const [patientId, setPatientId] = useState<string>('MBV-8821');
+    const patientIdRef = useRef<string>(patientId);
+    useEffect(() => { patientIdRef.current = patientId; }, [patientId]);
+
+    useEffect(() => {
+        const fetchDefaultPatient = async () => {
+            try {
+                const patients: { id: string }[] = await invoke('get_patients');
+                if (patients && patients.length > 0) {
+                    setPatientId(patients[0].id);
+                }
+            } catch (err) {
+                console.error("Failed to fetch default patient", err);
+            }
+        };
+        fetchDefaultPatient();
+    }, []);
+
     const timerRef = useRef<number | null>(null);
 
     // WebRTC Telehealth State
@@ -114,6 +136,15 @@ export default function Assessment() {
                             if (activeStep === 7) {
                                 const avg = newScores.reduce((a, b) => a + b, 0) / 7;
                                 setFinalScore(avg);
+
+                                // Save the completed assessment to SQLite
+                                const riskLevel = avg >= 80 ? "Low" : avg >= 50 ? "Moderate" : "High";
+                                invoke("save_assessment", {
+                                    id: assessmentIdRef.current,
+                                    patientId: patientIdRef.current,
+                                    score: avg,
+                                    riskLevel: riskLevel
+                                }).catch(err => console.error("Failed to save assessment to DB", err));
                             }
                             return newScores;
                         });
@@ -155,6 +186,16 @@ export default function Assessment() {
                 stepId: currentStep
             });
             setResult(postureResult);
+
+            if (sequenceMode && phase === 'capture') {
+                // Background stream landmarks to SQLite for Replay capabilities
+                invoke("save_assessment_frame", {
+                    assessmentId: assessmentIdRef.current,
+                    stepId: currentStep,
+                    timestampMs: Date.now(),
+                    landmarks: landmarks
+                }).catch(err => console.error("Failed to stream frame to DB", err));
+            }
         } catch (e: any) {
             console.error("Rust Invocation Error: ", e);
             setError(e.toString());
@@ -162,6 +203,8 @@ export default function Assessment() {
     }, [activeStep, sequenceMode, phase]);
 
     const startSequence = () => {
+        const newId = crypto.randomUUID();
+        setAssessmentId(newId);
         setActiveStep(1);
         setResult(null);
         setScores([]);
