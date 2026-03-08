@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
     User, Mail, Phone, MapPin, Award, Flame, Calendar, Activity,
     Bell, Lock, HelpCircle, ChevronRight, Star, Shield, LogOut, Pencil, X, Check
@@ -34,6 +35,17 @@ const settingsSections = [
 ];
 
 export default function Profile() {
+    const navigate = useNavigate();
+    const [activeSettingModal, setActiveSettingModal] = useState<string | null>(null);
+
+    // Settings States
+    const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+    const [progressAlerts, setProgressAlerts] = useState(true);
+    const [dataAnalytics, setDataAnalytics] = useState(true);
+    const [shareWithDoctor, setShareWithDoctor] = useState(true);
+    const [telehealthConsent, setTelehealthConsent] = useState(false);
+    const [rating, setRating] = useState(0);
+
     const [editing, setEditing] = useState(false);
     const [name, setName] = useState("Margaret Thompson");
     const [phone, setPhone] = useState("+60 12-345 6789");
@@ -212,6 +224,7 @@ export default function Profile() {
                                 {section.items.map(item => (
                                     <button
                                         key={item.label}
+                                        onClick={() => setActiveSettingModal(item.label)}
                                         className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-slate-50 transition-colors group text-left"
                                     >
                                         <div className="w-10 h-10 rounded-2xl bg-slate-100 group-hover:bg-indigo-50 flex items-center justify-center text-slate-500 group-hover:text-indigo-500 transition-colors flex-shrink-0">
@@ -231,7 +244,10 @@ export default function Profile() {
 
                 {/* Log Out */}
                 <div className="mt-6 pt-6 border-t border-slate-100">
-                    <button className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-rose-50 transition-colors group text-left">
+                    <button
+                        onClick={() => setActiveSettingModal("Sign Out")}
+                        className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-rose-50 transition-colors group text-left"
+                    >
                         <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center text-rose-500 flex-shrink-0">
                             <LogOut size={18} />
                         </div>
@@ -243,6 +259,180 @@ export default function Profile() {
                     </button>
                 </div>
             </div>
+
+            {/* Setting Modals */}
+            {activeSettingModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 border border-white/20">
+                        {/* Modal Header */}
+                        <div className="relative flex items-center justify-center p-8 border-b border-slate-50">
+                            <h3 className="text-xl font-bold text-slate-900">{activeSettingModal}</h3>
+                            <button
+                                onClick={() => setActiveSettingModal(null)}
+                                className="absolute right-0 top-0 w-14 h-14 !bg-[#EE4444] flex items-center justify-center !text-white hover:!bg-red-600 transition-all active:scale-90 shadow-md rounded-bl-3xl rounded-tr-[2.5rem] z-10"
+                                aria-label="Close"
+                            >
+                                <X size={24} strokeWidth={4} />
+                            </button>
+                        </div>
+
+                        <div className="p-8">
+                            {/* Modal Content based on activeSettingModal */}
+                            {activeSettingModal === "Notifications" && (
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between p-4 rounded-3xl bg-slate-50 border border-slate-100">
+                                        <div className="pr-4">
+                                            <p className="font-bold text-slate-800">Assessment Reminders</p>
+                                            <p className="text-xs text-slate-500 mt-1">Get notified when it's time for your check-in.</p>
+                                        </div>
+                                        <button
+                                            onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+                                            className={`relative inline-flex h-10 w-20 items-center rounded-full transition-all duration-300 focus:outline-none shadow-[inset_0_4px_8px_rgba(0,0,0,0.25)] ${notificationsEnabled ? '!bg-green-500' : '!bg-red-500'}`}
+                                        >
+                                            <span className={`flex items-center justify-center h-8 w-8 transform rounded-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.3)] transition-all duration-300 ease-in-out ${notificationsEnabled ? 'translate-x-10' : 'translate-x-1'}`}>
+                                                {notificationsEnabled ? <Check size={18} className="text-green-600" strokeWidth={4} /> : <X size={18} className="text-red-600" strokeWidth={4} />}
+                                            </span>
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center justify-between p-4 rounded-3xl bg-slate-50 border border-slate-100">
+                                        <div className="pr-4">
+                                            <p className="font-bold text-slate-800">Progress Alerts</p>
+                                            <p className="text-xs text-slate-500 mt-1">Receive updates on your weekly milestones.</p>
+                                        </div>
+                                        <button
+                                            onClick={() => setProgressAlerts(!progressAlerts)}
+                                            className={`relative inline-flex h-10 w-20 items-center rounded-full transition-all duration-300 focus:outline-none shadow-[inset_0_4px_8px_rgba(0,0,0,0.25)] ${progressAlerts ? '!bg-green-500' : '!bg-red-500'}`}
+                                        >
+                                            <span className={`flex items-center justify-center h-8 w-8 transform rounded-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.3)] transition-all duration-300 ease-in-out ${progressAlerts ? 'translate-x-10' : 'translate-x-1'}`}>
+                                                {progressAlerts ? <Check size={18} className="text-green-600" strokeWidth={4} /> : <X size={18} className="text-red-600" strokeWidth={4} />}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeSettingModal === "Privacy & Security" && (
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between p-4 rounded-3xl bg-slate-50 border border-slate-100">
+                                        <div className="pr-4">
+                                            <p className="font-bold text-slate-800">App Data Analytics</p>
+                                            <p className="text-xs text-slate-500 mt-1">Share anonymous usage data to help us improve.</p>
+                                        </div>
+                                        <button
+                                            onClick={() => setDataAnalytics(!dataAnalytics)}
+                                            className={`relative inline-flex h-10 w-20 items-center rounded-full transition-all duration-300 focus:outline-none shadow-[inset_0_4px_8px_rgba(0,0,0,0.25)] ${dataAnalytics ? '!bg-green-500' : '!bg-red-500'}`}
+                                        >
+                                            <span className={`flex items-center justify-center h-8 w-8 transform rounded-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.3)] transition-all duration-300 ease-in-out ${dataAnalytics ? 'translate-x-10' : 'translate-x-1'}`}>
+                                                {dataAnalytics ? <Check size={18} className="text-green-600" strokeWidth={4} /> : <X size={18} className="text-red-600" strokeWidth={4} />}
+                                            </span>
+                                        </button>
+                                    </div>
+                                    <div className="pt-4">
+                                        <button className="w-full py-4 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-slate-200 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 active:scale-95">
+                                            Change Password
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeSettingModal === "Medical Consent" && (
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between p-4 rounded-3xl bg-slate-50 border border-slate-100">
+                                        <div className="pr-4">
+                                            <p className="font-bold text-slate-800">Share with Primary Doctor</p>
+                                            <p className="text-xs text-slate-500 mt-1">Allow your assigned doctor to view your progress.</p>
+                                        </div>
+                                        <button
+                                            onClick={() => setShareWithDoctor(!shareWithDoctor)}
+                                            className={`relative inline-flex h-10 w-20 items-center rounded-full transition-all duration-300 focus:outline-none shadow-[inset_0_4px_8px_rgba(0,0,0,0.25)] ${shareWithDoctor ? '!bg-green-500' : '!bg-red-500'}`}
+                                        >
+                                            <span className={`flex items-center justify-center h-8 w-8 transform rounded-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.3)] transition-all duration-300 ease-in-out ${shareWithDoctor ? 'translate-x-10' : 'translate-x-1'}`}>
+                                                {shareWithDoctor ? <Check size={18} className="text-green-600" strokeWidth={4} /> : <X size={18} className="text-red-600" strokeWidth={4} />}
+                                            </span>
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center justify-between p-4 rounded-3xl bg-slate-50 border border-slate-100">
+                                        <div className="pr-4">
+                                            <p className="font-bold text-slate-800">Telehealth Access</p>
+                                            <p className="text-xs text-slate-500 mt-1">Consent to video calls and remote monitoring.</p>
+                                        </div>
+                                        <button
+                                            onClick={() => setTelehealthConsent(!telehealthConsent)}
+                                            className={`relative inline-flex h-10 w-20 items-center rounded-full transition-all duration-300 focus:outline-none shadow-[inset_0_4px_8px_rgba(0,0,0,0.25)] ${telehealthConsent ? '!bg-green-500' : '!bg-red-500'}`}
+                                        >
+                                            <span className={`flex items-center justify-center h-8 w-8 transform rounded-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.3)] transition-all duration-300 ease-in-out ${telehealthConsent ? 'translate-x-10' : 'translate-x-1'}`}>
+                                                {telehealthConsent ? <Check size={18} className="text-green-600" strokeWidth={4} /> : <X size={18} className="text-red-600" strokeWidth={4} />}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeSettingModal === "Help & FAQ" && (
+                                <div className="space-y-4 max-h-[20rem] overflow-y-auto pr-2 custom-scrollbar">
+                                    {[
+                                        { q: "How do I start an assessment?", a: "Go to the Home or Assessment tab and tap 'Start New Assessment'." },
+                                        { q: "Can I do exercises daily?", a: "Yes, your exercises are updated based on your recent performance." },
+                                        { q: "How do I contact my doctor?", a: "Use the Telehealth tab to join a scheduled consultation." },
+                                    ].map((faq, idx) => (
+                                        <div key={idx} className="bg-slate-50 p-5 rounded-[2rem] border border-slate-100 hover:bg-slate-100 transition-colors cursor-default">
+                                            <p className="font-bold text-slate-900 text-sm">{faq.q}</p>
+                                            <p className="text-slate-500 text-sm mt-2 leading-relaxed">{faq.a}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {activeSettingModal === "Rate Mobivia" && (
+                                <div className="text-center">
+                                    <p className="text-slate-500 mb-8 border-b border-slate-50 pb-6">How would you rate your experience with Mobivia so far?</p>
+                                    <div className="flex items-center justify-center gap-3 mb-10">
+                                        {[1, 2, 3, 4, 5].map((star) => (
+                                            <button
+                                                key={star}
+                                                onClick={() => setRating(star)}
+                                                className={`p-1 transition-all duration-300 hover:scale-125 ${rating >= star ? 'text-amber-400 drop-shadow-sm' : 'text-slate-200'}`}
+                                            >
+                                                <Star className={rating >= star ? "fill-current" : ""} size={44} strokeWidth={rating >= star ? 1.5 : 1} />
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button
+                                        onClick={() => setActiveSettingModal(null)}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold transition-all shadow-lg shadow-indigo-100 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 active:scale-95"
+                                    >
+                                        Submit Rating
+                                    </button>
+                                </div>
+                            )}
+
+                            {activeSettingModal === "Sign Out" && (
+                                <div className="text-center py-4">
+                                    <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
+                                        <LogOut size={36} />
+                                    </div>
+                                    <h4 className="text-2xl font-bold text-slate-900 mb-3">Sign Out</h4>
+                                    <p className="text-slate-500 mb-10 leading-relaxed px-4">Are you sure you want to sign out of your account?</p>
+                                    <div className="flex flex-col gap-3">
+                                        <button
+                                            onClick={() => navigate("/login")}
+                                            className="w-full py-4 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl font-bold transition-all shadow-lg shadow-rose-100 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 active:scale-95"
+                                        >
+                                            Yes, Sign Out
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveSettingModal(null)}
+                                            className="w-full py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold transition-all active:scale-95"
+                                        >
+                                            No, Keep me signed in
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

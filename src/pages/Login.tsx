@@ -9,7 +9,7 @@ export default function Login() {
         if (role === 'Doctor') {
             navigate('/doctor-dashboard');
         } else {
-            navigate('/dashboard/assessment');
+            navigate('/dashboard/home');
         }
     };
 
