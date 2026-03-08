@@ -8,26 +8,63 @@ import Exercises from "./pages/Exercises";
 import Profile from "./pages/Profile";
 import DoctorDashboard from "./pages/DoctorDashboard";
 import TelehealthConsultation from "./pages/TelehealthConsultation";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import "./App.css";
+
+const ProtectedRoute = ({ children, allowedRole }: { children: React.ReactNode, allowedRole?: 'Doctor' | 'Patient' }) => {
+  const { session, profile, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center bg-[#f2f2f7]">Loading...</div>;
+  }
+
+  if (!session) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (allowedRole && profile && profile.role !== allowedRole) {
+    return <Navigate to={profile.role === 'Doctor' ? '/doctor-dashboard' : '/dashboard/home'} replace />;
+  }
+
+  return <>{children}</>;
+};
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
-        <Route path="/doctor-telehealth" element={<TelehealthConsultation />} />
-        <Route path="/dashboard" element={<DashboardLayout />}>
-          <Route path="" element={<Navigate to="home" replace />} />
-          <Route path="home" element={<Home />} />
-          <Route path="assessment" element={<Assessment />} />
-          <Route path="progress" element={<Progress />} />
-          <Route path="exercises" element={<Exercises />} />
-          <Route path="profile" element={<Profile />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<Login />} />
+
+          {/* Doctor Protected Routes */}
+          <Route path="/doctor-dashboard" element={
+            <ProtectedRoute allowedRole="Doctor">
+              <DoctorDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/doctor-telehealth" element={
+            <ProtectedRoute allowedRole="Doctor">
+              <TelehealthConsultation />
+            </ProtectedRoute>
+          } />
+
+          {/* Patient Protected Routes */}
+          <Route path="/dashboard" element={
+            <ProtectedRoute allowedRole="Patient">
+              <DashboardLayout />
+            </ProtectedRoute>
+          }>
+            <Route path="" element={<Navigate to="home" replace />} />
+            <Route path="home" element={<Home />} />
+            <Route path="assessment" element={<Assessment />} />
+            <Route path="progress" element={<Progress />} />
+            <Route path="exercises" element={<Exercises />} />
+            <Route path="profile" element={<Profile />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 

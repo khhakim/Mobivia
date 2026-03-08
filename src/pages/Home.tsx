@@ -1,7 +1,10 @@
 import { Link } from "react-router-dom";
 import { PlayCircle, Activity, CalendarCheck, TrendingUp, Award, Clock } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function Home() {
+    const { profile } = useAuth();
+
     // Current date logic for dynamic greeting
     const date = new Date();
     const hour = date.getHours();
@@ -13,6 +16,8 @@ export default function Home() {
         day: "numeric",
     });
 
+    const firstName = profile?.full_name?.split(' ')[0] || "User";
+
     return (
         <div className="w-full flex flex-col gap-8 animate-in fade-in duration-500">
             {/* Header Section */}
@@ -20,7 +25,7 @@ export default function Home() {
                 <div>
                     <p className="text-sky-600 font-medium mb-1 tracking-wide uppercase text-sm">{formattedDate}</p>
                     <h1 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
-                        {greeting}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-500 to-indigo-600">Margaret</span>
+                        {greeting}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-500 to-indigo-600">{firstName}</span>
                     </h1>
                     <p className="text-slate-500 mt-2 text-lg">
                         Ready to improve your mobility today?

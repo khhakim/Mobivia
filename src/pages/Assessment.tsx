@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { Dumbbell, PhoneCall } from "lucide-react";
 import VisionEngine, { Landmark } from "../components/VisionEngine";
 import Peer, { MediaConnection } from "peerjs";
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../contexts/AuthContext";
 
 interface Metric {
     label: string;
@@ -47,25 +49,17 @@ export default function Assessment() {
     const assessmentIdRef = useRef<string>('');
     useEffect(() => { assessmentIdRef.current = assessmentId; }, [assessmentId]);
 
-    const [patientId, setPatientId] = useState<string>('MBV-8821');
-    const patientIdRef = useRef<string>(patientId);
-    useEffect(() => { patientIdRef.current = patientId; }, [patientId]);
+    const { profile } = useAuth();
+    const patientIdRef = useRef<string>('');
 
     useEffect(() => {
-        const fetchDefaultPatient = async () => {
-            try {
-                const patients: { id: string }[] = await invoke('get_patients');
-                if (patients && patients.length > 0) {
-                    setPatientId(patients[0].id);
-                }
-            } catch (err) {
-                console.error("Failed to fetch default patient", err);
-            }
-        };
-        fetchDefaultPatient();
-    }, []);
+        if (profile?.id) {
+            patientIdRef.current = profile.id;
+        }
+    }, [profile]);
 
     const timerRef = useRef<number | null>(null);
+    const frameBatchRef = useRef<{ timestampMs: number, landmarks: Landmark[] }[]>([]);
 
     // WebRTC Telehealth State
     const [peerId, setPeerId] = useState<string>('');
@@ -117,58 +111,77 @@ export default function Assessment() {
         }
     }, [remoteStream]);
 
-    // Auto-advance logic for the guided sequence
+    // 1. Timer countdown effect
     useEffect(() => {
         if (!sequenceMode || phase === 'idle' || phase === 'complete') return;
 
-        timerRef.current = setInterval(() => {
-            setTimer((prev) => {
-                if (prev <= 1) {
-                    // Timer hit 0, transition phase
-                    clearInterval(timerRef.current!);
-
-                    if (phase === 'prepare') {
-                        setPhase('capture');
-                        return 5; // 5 seconds to capture peak posture
-                    } else if (phase === 'capture') {
-                        setScores(prevScores => {
-                            const newScores = [...prevScores, resultRef.current?.score || 0];
-                            if (activeStep === 7) {
-                                const avg = newScores.reduce((a, b) => a + b, 0) / 7;
-                                setFinalScore(avg);
-
-                                // Save the completed assessment to SQLite
-                                const riskLevel = avg >= 80 ? "Low" : avg >= 50 ? "Moderate" : "High";
-                                invoke("save_assessment", {
-                                    id: assessmentIdRef.current,
-                                    patientId: patientIdRef.current,
-                                    score: avg,
-                                    riskLevel: riskLevel
-                                }).catch(err => console.error("Failed to save assessment to DB", err));
-                            }
-                            return newScores;
-                        });
-
-                        if (activeStep < 7) {
-                            setPhase('prepare');
-                            setResult(null); // Clear previous result
-                            setActiveStep(s => s + 1); // Delay step increment explicitly
-                            return 15; // 15 seconds to prepare for next step
-                        } else {
-                            setPhase('complete');
-                            setSequenceMode(false);
-                            return 0;
-                        }
-                    }
-                }
-                return prev - 1;
-            });
+        timerRef.current = window.setInterval(() => {
+            setTimer((prev) => Math.max(0, prev - 1));
         }, 1000);
 
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, [sequenceMode, phase]); // Removed activeStep from dependency to prevent re-triggering the interval mid-countdown
+    }, [sequenceMode, phase]);
+
+    // 2. Phase transition effect
+    useEffect(() => {
+        if (!sequenceMode || phase === 'idle' || phase === 'complete') return;
+        if (timer > 0) return; // Only transition when timer hits 0
+
+        // Timer hit 0, transition phase
+        if (phase === 'prepare') {
+            setPhase('capture');
+            setTimer(5); // 5 seconds to capture peak posture
+        } else if (phase === 'capture') {
+            setScores(prevScores => {
+                const newScores = [...prevScores, resultRef.current?.score || 0];
+                if (activeStep === 7) {
+                    const avg = newScores.reduce((a, b) => a + b, 0) / 7;
+                    setFinalScore(avg);
+
+                    const riskLevel = avg >= 80 ? "Low" : avg >= 50 ? "Moderate" : "High";
+
+                    // Update the completed assessment in Supabase
+                    supabase.from("assessments").update({
+                        overall_score: avg,
+                        risk_level: riskLevel,
+                        status: 'completed'
+                    })
+                        .eq('id', assessmentIdRef.current)
+                        .then(({ error }) => {
+                            if (error) console.error("Failed to update assessment in DB", error);
+                        });
+                }
+                return newScores;
+            });
+
+            // Save batched frames for this step to Supabase
+            if (frameBatchRef.current.length > 0) {
+                const framesToSave = [...frameBatchRef.current];
+                frameBatchRef.current = []; // Clear for next step
+
+                supabase.from('assessment_frames').insert([{
+                    assessment_id: assessmentIdRef.current,
+                    step_id: activeStep,
+                    frames_data: framesToSave
+                }]).then(({ error }) => {
+                    if (error) console.error("Failed to save batched frames", error);
+                });
+            }
+
+            if (activeStep < 7) {
+                setPhase('prepare');
+                setResult(null); // Clear previous result
+                setActiveStep(s => s + 1);
+                setTimer(15); // 15 seconds to prepare for next step
+            } else {
+                setPhase('complete');
+                setSequenceMode(false);
+                setTimer(0);
+            }
+        }
+    }, [timer, sequenceMode, phase, activeStep]);
 
     // Hook this callback into VisionEngine so we stream live frames into Rust
     const handlePoseDetected = useCallback(async (landmarks: Landmark[]) => {
@@ -188,13 +201,11 @@ export default function Assessment() {
             setResult(postureResult);
 
             if (sequenceMode && phase === 'capture') {
-                // Background stream landmarks to SQLite for Replay capabilities
-                invoke("save_assessment_frame", {
-                    assessmentId: assessmentIdRef.current,
-                    stepId: currentStep,
+                // Batch landmarks in memory instead of heavy network calls
+                frameBatchRef.current.push({
                     timestampMs: Date.now(),
                     landmarks: landmarks
-                }).catch(err => console.error("Failed to stream frame to DB", err));
+                });
             }
         } catch (e: any) {
             console.error("Rust Invocation Error: ", e);
@@ -212,6 +223,16 @@ export default function Assessment() {
         setSequenceMode(true);
         setPhase('prepare');
         setTimer(15); // 15 secs to prep for step 1
+        frameBatchRef.current = [];
+
+        // Insert pending assessment immediately
+        supabase.from('assessments').insert([{
+            id: newId,
+            patient_id: patientIdRef.current,
+            status: 'pending'
+        }]).then(({ error }) => {
+            if (error) console.error("Failed to create pending assessment", error);
+        });
     };
     // We don't need the mock test button anymore since the camera streams data!
 
@@ -424,7 +445,7 @@ export default function Assessment() {
                 {/* Assessment Real-Time Metrics */}
                 {error && (
                     <div className="bg-red-50 border border-red-100 rounded-2xl p-4 text-red-600 text-sm shadow-sm">
-                        <b>Connection Fault:</b> {error}
+                        <b>Engine Fault:</b> {error}
                     </div>
                 )}
 

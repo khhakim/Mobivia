@@ -1,8 +1,11 @@
-import { Outlet, Link, useLocation } from "react-router-dom";
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { Home, ClipboardList, TrendingUp, Dumbbell, User, LogOut } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function DashboardLayout() {
     const location = useLocation();
+    const navigate = useNavigate();
+    const { signOut, profile } = useAuth();
 
     const navLinks = [
         { name: "Home", path: "/dashboard/home", icon: Home },
@@ -46,21 +49,23 @@ export default function DashboardLayout() {
                 <div className="p-4 border-t border-slate-100 flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold">
-                            MT
+                            {profile?.full_name?.substring(0, 2).toUpperCase() || 'P'}
                         </div>
                         <div>
-                            <p className="text-sm font-bold text-slate-800">Margaret T.</p>
-                            <p className="text-xs text-slate-500">Age 72</p>
+                            <p className="text-sm font-bold text-slate-800">{profile?.full_name || 'Patient'}</p>
+                            <p className="text-xs text-slate-500">Age {profile?.age || '--'}</p>
                         </div>
                     </div>
-                    <Link
-                        to="/login"
-                        onClick={() => localStorage.removeItem('mobivia_role')}
+                    <button
+                        onClick={async () => {
+                            await signOut();
+                            navigate('/login');
+                        }}
                         className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                         title="Log Out"
                     >
                         <LogOut size={18} />
-                    </Link>
+                    </button>
                 </div>
             </aside>
 

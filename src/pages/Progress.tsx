@@ -2,17 +2,11 @@ import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart
 } from "recharts";
 import { TrendingUp, Award, Calendar, Activity, ChevronRight, Flame, Target, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../contexts/AuthContext";
 
-const mobilityData = [
-    { month: "Sep", score: 62 },
-    { month: "Oct", score: 68 },
-    { month: "Nov", score: 71 },
-    { month: "Dec", score: 74 },
-    { month: "Jan", score: 79 },
-    { month: "Feb", score: 82 },
-    { month: "Mar", score: 88 },
-];
-
+// Keep weekly data mocked for now as it requires complex daily aggregation we don't have yet
 const weeklyData = [
     { day: "Mon", flexibility: 70, strength: 60, balance: 75 },
     { day: "Tue", flexibility: 75, strength: 65, balance: 72 },
@@ -21,33 +15,6 @@ const weeklyData = [
     { day: "Fri", flexibility: 85, strength: 78, balance: 83 },
     { day: "Sat", flexibility: 82, strength: 80, balance: 85 },
     { day: "Sun", flexibility: 88, strength: 82, balance: 87 },
-];
-
-const recentAssessments = [
-    {
-        date: "Today, Mar 7",
-        score: 88,
-        trend: "+6",
-        status: "Great",
-        color: "text-emerald-500",
-        details: ["Excellent balance stability", "Improved hip mobility", "Strong posture alignment"],
-    },
-    {
-        date: "Mar 5",
-        score: 82,
-        trend: "+3",
-        status: "Good",
-        color: "text-sky-500",
-        details: ["Slight tightness in shoulders", "Balance within normal range", "Core strength improving"],
-    },
-    {
-        date: "Mar 3",
-        score: 79,
-        trend: "+1",
-        status: "Fair",
-        color: "text-amber-500",
-        details: ["Some stiffness in lower back", "Recommended: stretch routine", "Posture slightly forward"],
-    },
 ];
 
 function MetricBar({ label, value, color }: { label: string; value: number; color: string }) {
@@ -81,6 +48,76 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function Progress() {
+    const { user } = useAuth();
+    const [mobilityData, setMobilityData] = useState<any[]>([]);
+    const [recentAssessments, setRecentAssessments] = useState<any[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        if (!user) return;
+
+        const loadProgress = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('assessments')
+                    .select('*')
+                    .eq('patient_id', user.id)
+                    .order('created_at', { ascending: true }); // Ascending for chart
+
+                if (error) throw error;
+
+                if (data && data.length > 0) {
+                    // 1. Process chart data (Aggregate by month or just take sequence)
+                    const mData = data.map((a: any) => {
+                        const date = new Date(a.created_at);
+                        const month = date.toLocaleString('default', { month: 'short' });
+                        return { month: `${month} ${date.getDate()}`, score: a.overall_score || 0 };
+                    });
+                    setMobilityData(mData);
+
+                    // 2. Process recent assessments list (Descending order)
+                    const descendingData = [...data].reverse().slice(0, 3);
+
+                    const rData = descendingData.map((a: any, index: number) => {
+                        const date = new Date(a.created_at);
+                        const prevScore = index < descendingData.length - 1 ? descendingData[index + 1].overall_score : a.overall_score;
+                        const diff = a.overall_score - prevScore;
+                        const trend = diff > 0 ? `+${diff}` : `${diff}`;
+
+                        let status = "Fair";
+                        let color = "text-amber-500";
+                        if (a.overall_score >= 80) { status = "Great"; color = "text-emerald-500"; }
+                        else if (a.overall_score >= 60) { status = "Good"; color = "text-sky-500"; }
+
+                        return {
+                            date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+                            score: a.overall_score,
+                            trend: trend,
+                            status: status,
+                            color: color,
+                            details: [`Risk Level: ${a.risk_level || 'Unknown'}`], // Add more dynamic details later
+                        };
+                    });
+                    setRecentAssessments(rData);
+                }
+            } catch (error) {
+                console.error("Error loading progress:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadProgress();
+    }, [user]);
+
+    const latestAssessment = recentAssessments.length > 0 ? recentAssessments[0] : null;
+    const currentScore = latestAssessment ? latestAssessment.score : 0;
+    const totalAssessments = mobilityData.length;
+
+    if (isLoading) {
+        return <div className="p-8 text-center text-slate-500">Loading progress data...</div>;
+    }
+
     return (
         <div className="w-full flex flex-col gap-8 animate-in fade-in duration-500">
             {/* Header */}
@@ -93,10 +130,10 @@ export default function Progress() {
             {/* Stats Row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                    { icon: <Flame size={20} />, label: "Current Streak", value: "12 Days", sub: "Personal best!", color: "bg-orange-50 text-orange-500", border: "border-orange-100" },
-                    { icon: <Target size={20} />, label: "Current Score", value: "88 / 100", sub: "+6 this week", color: "bg-sky-50 text-sky-500", border: "border-sky-100" },
-                    { icon: <Calendar size={20} />, label: "Assessments", value: "24 Total", sub: "This month: 8", color: "bg-indigo-50 text-indigo-500", border: "border-indigo-100" },
-                    { icon: <Award size={20} />, label: "Badges Earned", value: "7 Badges", sub: "3 this month", color: "bg-emerald-50 text-emerald-500", border: "border-emerald-100" },
+                    { icon: <Flame size={20} />, label: "Current Streak", value: "Active", sub: "Keep it up!", color: "bg-orange-50 text-orange-500", border: "border-orange-100" },
+                    { icon: <Target size={20} />, label: "Current Score", value: `${currentScore} / 100`, sub: latestAssessment ? `${latestAssessment.trend} pts` : "No data", color: "bg-sky-50 text-sky-500", border: "border-sky-100" },
+                    { icon: <Calendar size={20} />, label: "Assessments", value: `${totalAssessments} Total`, sub: "Recording progress", color: "bg-indigo-50 text-indigo-500", border: "border-indigo-100" },
+                    { icon: <Award size={20} />, label: "Badges Earned", value: "6 Badges", sub: "Great job!", color: "bg-emerald-50 text-emerald-500", border: "border-emerald-100" },
                 ].map((stat) => (
                     <div key={stat.label} className={`bg-white rounded-3xl p-5 shadow-sm border ${stat.border} flex flex-col gap-3 hover:shadow-md transition-shadow`}>
                         <div className={`w-10 h-10 rounded-2xl ${stat.color} flex items-center justify-center`}>
@@ -126,19 +163,25 @@ export default function Progress() {
                     </div>
                 </div>
                 <ResponsiveContainer width="100%" height={240}>
-                    <AreaChart data={mobilityData}>
-                        <defs>
-                            <linearGradient id="scoreGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
-                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                            </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="month" tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
-                        <YAxis domain={[50, 100]} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
-                        <Tooltip content={<CustomTooltip />} />
-                        <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={3} fill="url(#scoreGrad)" dot={{ r: 5, fill: "#6366f1", stroke: "white", strokeWidth: 2 }} activeDot={{ r: 8 }} />
-                    </AreaChart>
+                    {mobilityData.length > 0 ? (
+                        <AreaChart data={mobilityData}>
+                            <defs>
+                                <linearGradient id="scoreGrad" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
+                                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                            <XAxis dataKey="month" tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
+                            <YAxis domain={[50, 100]} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={3} fill="url(#scoreGrad)" dot={{ r: 5, fill: "#6366f1", stroke: "white", strokeWidth: 2 }} activeDot={{ r: 8 }} />
+                        </AreaChart>
+                    ) : (
+                        <div className="h-full flex items-center justify-center text-slate-400">
+                            Complete an assessment to see your chart!
+                        </div>
+                    )}
                 </ResponsiveContainer>
             </div>
 
@@ -198,7 +241,7 @@ export default function Progress() {
                     Recent Assessment History
                 </h3>
                 <div className="flex flex-col gap-4">
-                    {recentAssessments.map((a) => (
+                    {recentAssessments.length > 0 ? recentAssessments.map((a) => (
                         <div key={a.date} className="flex items-start gap-5 p-5 rounded-2xl bg-slate-50 border border-slate-100 hover:bg-slate-100 transition-colors cursor-pointer group">
                             <div className="flex-shrink-0 text-center">
                                 <p className={`text-3xl font-black ${a.color}`}>{a.score}</p>
@@ -210,7 +253,7 @@ export default function Progress() {
                                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full bg-white border ${a.color} border-current`}>{a.status}</span>
                                 </div>
                                 <ul className="space-y-1">
-                                    {a.details.map((d) => (
+                                    {a.details.map((d: string) => (
                                         <li key={d} className="text-slate-500 text-sm flex items-start gap-2">
                                             <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-slate-300 flex-shrink-0" />
                                             {d}
@@ -220,7 +263,9 @@ export default function Progress() {
                             </div>
                             <ChevronRight size={20} className="text-slate-300 group-hover:text-slate-500 transition-colors flex-shrink-0 mt-1" />
                         </div>
-                    ))}
+                    )) : (
+                        <div className="text-center py-8 text-slate-400">No assessments completed yet.</div>
+                    )}
                 </div>
             </div>
         </div>

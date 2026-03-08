@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useNavigate } from "react-router-dom";
 import {
     User, Mail, Phone, MapPin, Award, Flame, Calendar, Activity,
     Bell, Lock, HelpCircle, ChevronRight, Star, Shield, LogOut, Pencil, X, Check
 } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
 
 const badges = [
     { icon: <Flame size={18} />, label: "7-Day Streak", color: "bg-orange-100 text-orange-500 border-orange-200" },
@@ -34,19 +37,50 @@ const settingsSections = [
 ];
 
 export default function Profile() {
+    const navigate = useNavigate();
+    const { signOut, profile, user } = useAuth();
     const [editing, setEditing] = useState(false);
-    const [name, setName] = useState("Margaret Thompson");
-    const [phone, setPhone] = useState("+60 12-345 6789");
-    const [location, setLocation] = useState("Kuala Lumpur, Malaysia");
+
+    // We try to pull from `profile`, otherwise provide empty defaults
+    const [name, setName] = useState(profile?.full_name || "");
+    const [phone, setPhone] = useState(""); // Optionally we could add `phone` to profile db schema in the future
+    const [location, setLocation] = useState("");
+
     const [draftName, setDraftName] = useState(name);
     const [draftPhone, setDraftPhone] = useState(phone);
     const [draftLocation, setDraftLocation] = useState(location);
+    const [isSaving, setIsSaving] = useState(false);
 
-    const saveEdit = () => {
-        setName(draftName);
-        setPhone(draftPhone);
-        setLocation(draftLocation);
-        setEditing(false);
+    // Sync state if profile loads slightly after component mounts
+    useEffect(() => {
+        if (profile) {
+            setName(profile.full_name || "");
+            setDraftName(profile.full_name || "");
+        }
+    }, [profile]);
+
+    const saveEdit = async () => {
+        if (!user) return;
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from('profiles')
+                .update({ full_name: draftName })
+                .eq('id', user.id);
+
+            if (error) throw error;
+
+            // Only update local state if the db updated successfully
+            setName(draftName);
+            setPhone(draftPhone);
+            setLocation(draftLocation);
+            setEditing(false);
+        } catch (error) {
+            console.error('Failed to update profile:', error);
+            // Optionally could add a toast/error banner here
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const cancelEdit = () => {
@@ -75,9 +109,9 @@ export default function Profile() {
                     </div>
                     {/* Info */}
                     <div className="flex-1 text-center md:text-left">
-                        <h2 className="text-2xl font-bold">{name}</h2>
+                        <h2 className="text-2xl font-bold">{name || "Your Name"}</h2>
                         <p className="text-indigo-100 mt-1 flex items-center justify-center md:justify-start gap-1.5">
-                            <Mail size={14} /> margaret.thompson@email.com
+                            <Mail size={14} /> {user?.email}
                         </p>
                         <div className="flex flex-wrap gap-2 mt-4 justify-center md:justify-start">
                             {conditions.map(c => (
@@ -128,10 +162,18 @@ export default function Profile() {
                             </button>
                         ) : (
                             <div className="flex gap-2">
-                                <button onClick={saveEdit} className="flex items-center gap-1 text-emerald-600 text-sm font-semibold hover:text-emerald-700">
-                                    <Check size={14} /> Save
+                                <button
+                                    onClick={saveEdit}
+                                    disabled={isSaving}
+                                    className="flex items-center gap-1 text-emerald-600 text-sm font-semibold hover:text-emerald-700 disabled:opacity-50"
+                                >
+                                    <Check size={14} /> {isSaving ? "Saving..." : "Save"}
                                 </button>
-                                <button onClick={cancelEdit} className="flex items-center gap-1 text-slate-400 text-sm font-semibold hover:text-slate-600">
+                                <button
+                                    onClick={cancelEdit}
+                                    disabled={isSaving}
+                                    className="flex items-center gap-1 text-slate-400 text-sm font-semibold hover:text-slate-600 disabled:opacity-50"
+                                >
                                     <X size={14} /> Cancel
                                 </button>
                             </div>
@@ -139,10 +181,10 @@ export default function Profile() {
                     </div>
                     <div className="space-y-4">
                         {[
-                            { icon: <User size={16} />, label: "Full Name", value: name, draft: draftName, setter: setDraftName, key: "name" },
-                            { icon: <Mail size={16} />, label: "Email", value: "margaret.thompson@email.com", draft: null, setter: null, key: "email" },
-                            { icon: <Phone size={16} />, label: "Phone", value: phone, draft: draftPhone, setter: setDraftPhone, key: "phone" },
-                            { icon: <MapPin size={16} />, label: "Location", value: location, draft: draftLocation, setter: setDraftLocation, key: "location" },
+                            { icon: <User size={16} />, label: "Full Name", value: name, draft: draftName, setter: setDraftName, key: "name", placeholder: "e.g. John Doe" },
+                            { icon: <Mail size={16} />, label: "Email", value: user?.email, draft: null, setter: null, key: "email" },
+                            { icon: <Phone size={16} />, label: "Phone", value: phone || "Not set", draft: draftPhone, setter: setDraftPhone, key: "phone", placeholder: "e.g. +60 12-345" },
+                            { icon: <MapPin size={16} />, label: "Location", value: location || "Not set", draft: draftLocation, setter: setDraftLocation, key: "location", placeholder: "e.g. Kuala Lumpur" },
                         ].map(field => (
                             <div key={field.key} className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50">
                                 <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center text-slate-500 shadow-sm flex-shrink-0 mt-0.5">
@@ -155,6 +197,7 @@ export default function Profile() {
                                             className="w-full text-sm font-semibold text-slate-700 bg-white border border-sky-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-300"
                                             value={field.draft ?? ""}
                                             onChange={e => field.setter!(e.target.value)}
+                                            placeholder={field.placeholder}
                                         />
                                     ) : (
                                         <p className="text-sm font-semibold text-slate-700">{field.value}</p>
@@ -231,7 +274,13 @@ export default function Profile() {
 
                 {/* Log Out */}
                 <div className="mt-6 pt-6 border-t border-slate-100">
-                    <button className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-rose-50 transition-colors group text-left">
+                    <button
+                        onClick={async () => {
+                            await signOut();
+                            navigate('/login');
+                        }}
+                        className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-rose-50 transition-colors group text-left"
+                    >
                         <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center text-rose-500 flex-shrink-0">
                             <LogOut size={18} />
                         </div>

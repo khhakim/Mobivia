@@ -2,13 +2,14 @@ import { useState, useRef, useEffect } from 'react';
 import {
     Users, Activity, FileText, Settings, Video, Download, CheckCircle, AlertTriangle, XCircle, Play, Pause, FastForward, Rewind, LogOut
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Landmark } from "../components/VisionEngine";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { invoke } from '@tauri-apps/api/core';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
 
 // Mock fallback if DB is empty
 const MOCK_PATIENT = {
@@ -226,6 +227,7 @@ useGLTF.preload('/human_model.glb');
 
 export default function DoctorDashboard() {
     const navigate = useNavigate();
+    const { signOut } = useAuth();
     const [activeStep, setActiveStep] = useState(2); // Start with 'Sitting Upright' to show data
     const [isPlaying, setIsPlaying] = useState(false);
     const [showSkeleton, setShowSkeleton] = useState(true);
@@ -250,10 +252,40 @@ export default function DoctorDashboard() {
     useEffect(() => {
         const fetchPatients = async () => {
             try {
-                const fetched: PatientSummary[] = await invoke('get_patient_summaries');
-                setPatients(fetched);
-                if (fetched.length > 0 && !selectedPatientId) {
-                    setSelectedPatientId(fetched[0].id);
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select(`
+                        id, 
+                        full_name, 
+                        age, 
+                        assessments (
+                            created_at,
+                            overall_score,
+                            risk_level
+                        )
+                    `)
+                    .eq('role', 'Patient');
+
+                if (error) throw error;
+
+                if (data) {
+                    const fetched: PatientSummary[] = data.map(p => {
+                        const sortedAssessments = p.assessments?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) || [];
+                        const latest = sortedAssessments[0];
+                        return {
+                            id: p.id,
+                            name: p.full_name || 'Unknown Patient',
+                            age: p.age || 0,
+                            latest_assessment: latest ? new Date(latest.created_at).toISOString().split('T')[0] : null,
+                            latest_score: latest ? latest.overall_score : null,
+                            latest_risk: latest ? latest.risk_level : null
+                        };
+                    });
+
+                    setPatients(fetched);
+                    if (fetched.length > 0 && !selectedPatientId) {
+                        setSelectedPatientId(fetched[0].id);
+                    }
                 }
             } catch (err) {
                 console.error("Failed to load patients", err);
@@ -272,24 +304,26 @@ export default function DoctorDashboard() {
 
         const fetchHistory = async () => {
             try {
-                const history: { date: string, score: number }[] = await invoke('get_assessment_history', {
-                    patientId: selectedPatientId
-                });
+                const { data, error } = await supabase
+                    .from('assessments')
+                    .select('created_at, overall_score')
+                    .eq('patient_id', selectedPatientId)
+                    .order('created_at', { ascending: true });
 
-                if (history && history.length > 0) {
+                if (error) throw error;
+
+                if (data && data.length > 0) {
                     setTrendData(() => {
+                        const history = data.map(h => ({
+                            date: new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                            score: Math.round(h.overall_score)
+                        }));
+
                         // Keep some mock past data for visual effect if DB is mostly empty
                         if (history.length < 3) {
-                            return [...MOCK_TREND_DATA, ...history.map(h => ({
-                                date: new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                                score: Math.round(h.score)
-                            }))];
+                            return [...MOCK_TREND_DATA, ...history];
                         }
-
-                        return history.map(h => ({
-                            date: new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                            score: Math.round(h.score)
-                        }));
+                        return history;
                     });
                 }
             } catch (err) {
@@ -387,14 +421,16 @@ export default function DoctorDashboard() {
                     </button>
 
                     <div className="mt-8 border-t border-slate-100 pt-4 px-3">
-                        <Link
-                            to="/login"
-                            onClick={() => localStorage.removeItem('mobivia_role')}
+                        <button
+                            onClick={async () => {
+                                await signOut();
+                                navigate('/login');
+                            }}
                             className="w-full flex items-center space-x-3 py-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl font-medium transition-colors px-3"
                         >
                             <LogOut size={18} />
                             <span className="text-sm">Log Out</span>
-                        </Link>
+                        </button>
                     </div>
                 </nav>
             </aside>
