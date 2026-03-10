@@ -18,6 +18,7 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isInitializing, setIsInitializing] = useState(true);
+    const [cameraError, setCameraError] = useState<'denied' | 'notfound' | 'other' | null>(null);
 
     // Track the latest callback without triggering re-initializations of the heavy AI model
     const onPoseDetectedRef = useRef(onPoseDetected);
@@ -82,8 +83,18 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
 
                     setIsInitializing(false);
                 }
-            } catch (error) {
+            } catch (error: any) {
                 console.error("Error initializing MediaPipe:", error);
+                const name = error?.name || '';
+                const msg = error?.message?.toLowerCase() || '';
+                if (name === 'NotAllowedError' || msg.includes('permission') || msg.includes('denied') || msg.includes('not allowed')) {
+                    setCameraError('denied');
+                } else if (name === 'NotFoundError' || msg.includes('not found') || msg.includes('no camera')) {
+                    setCameraError('notfound');
+                } else {
+                    setCameraError('other');
+                }
+                setIsInitializing(false);
             }
         }
 
@@ -205,8 +216,54 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
                 className="absolute top-0 left-0 w-full h-full object-cover z-10 rounded-3xl"
             ></canvas>
 
+            {/* Camera Permission Error — macOS users need to grant manually */}
+            {cameraError === 'denied' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/95 z-20 rounded-3xl p-6">
+                    <div className="text-center max-w-sm">
+                        <div className="text-4xl mb-4">📷</div>
+                        <h3 className="text-white font-bold text-lg mb-2">Camera Access Required</h3>
+                        <p className="text-slate-400 text-sm mb-5">Mobivia needs your camera for posture analysis. Please grant access:</p>
+                        <div className="bg-slate-800 rounded-xl p-4 text-left space-y-2 text-sm text-slate-300">
+                            <p className="font-semibold text-white">On macOS:</p>
+                            <p>1. Open <span className="text-sky-400">System Settings</span></p>
+                            <p>2. Go to <span className="text-sky-400">Privacy & Security → Camera</span></p>
+                            <p>3. Enable <span className="text-sky-400">Mobivia</span></p>
+                            <p>4. Restart the app</p>
+                        </div>
+                        <div className="bg-slate-800 rounded-xl p-4 text-left space-y-2 text-sm text-slate-300 mt-3">
+                            <p className="font-semibold text-white">On Windows:</p>
+                            <p>1. Open <span className="text-sky-400">Settings → Privacy → Camera</span></p>
+                            <p>2. Enable camera for desktop apps</p>
+                            <p>3. Restart the app</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* No camera found */}
+            {cameraError === 'notfound' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/95 z-20 rounded-3xl p-6">
+                    <div className="text-center">
+                        <div className="text-4xl mb-4">🔌</div>
+                        <h3 className="text-white font-bold text-lg mb-2">No Camera Found</h3>
+                        <p className="text-slate-400 text-sm">Please connect a camera and restart the app.</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Generic engine error */}
+            {cameraError === 'other' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/95 z-20 rounded-3xl p-6">
+                    <div className="text-center">
+                        <div className="text-4xl mb-4">⚠️</div>
+                        <h3 className="text-white font-bold text-lg mb-2">Vision Engine Error</h3>
+                        <p className="text-slate-400 text-sm">Could not start the AI engine. Please restart the app.</p>
+                    </div>
+                </div>
+            )}
+
             {/* Loading Overlay */}
-            {isInitializing && (
+            {isInitializing && !cameraError && (
                 <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-sm z-20">
                     <div className="text-center space-y-4">
                         <div className="w-16 h-16 border-4 border-t-sky-500 border-slate-200 rounded-full animate-spin mx-auto"></div>
@@ -217,7 +274,7 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
             )}
 
             {/* Overlay Status Frame */}
-            {!isInitializing && (
+            {!isInitializing && !cameraError && (
                 <div className="absolute bottom-4 left-4 z-30 bg-white/80 backdrop-blur-md px-4 py-2 rounded-xl border border-slate-200 shadow-md flex items-center space-x-2">
                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
                     <span className="text-slate-700 font-medium text-sm">Vision Engine Active</span>
