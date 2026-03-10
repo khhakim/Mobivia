@@ -6,20 +6,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../contexts/AuthContext";
 import { invoke } from "@tauri-apps/api/core";
-import { Landmark } from "../components/VisionEngine";
-
-interface Metric {
-    label: string;
-    value: number;
-    unit: string;
-    passed: boolean;
-}
-
-interface PostureResult {
-    metrics: Metric[];
-    passed: boolean;
-    score: number;
-}
+import { isTauri, calculatePostureJS } from "../lib/postureEngine";
+import type { PostureResult } from "../lib/postureEngine";
+import type { Landmark } from "../components/VisionEngine";
 
 const ASSESSMENT_STEPS_META = [
     { id: 1, title: 'Standing Naturally', subtitle: 'Baseline posture' },
@@ -167,13 +156,16 @@ export default function Progress() {
                         const rawFrames = row.frames_data as { timestampMs: number, landmarks: Landmark[] }[];
                         if (rawFrames.length > 0) {
                             try {
-                                // Use the middle frame — it's the most likely to represent
-                                // the patient's settled, optimal pose (first frames are often transitional)
                                 const middleIdx = Math.floor(rawFrames.length / 2);
-                                const postureResult: PostureResult = await invoke<PostureResult>("calculate_posture", {
-                                    landmarks: rawFrames[middleIdx].landmarks,
-                                    stepId: sId
-                                });
+                                let postureResult: PostureResult;
+                                if (isTauri()) {
+                                    postureResult = await invoke<PostureResult>("calculate_posture", {
+                                        landmarks: rawFrames[middleIdx].landmarks,
+                                        stepId: sId
+                                    });
+                                } else {
+                                    postureResult = calculatePostureJS(rawFrames[middleIdx].landmarks, sId);
+                                }
                                 results[sId] = postureResult;
                             } catch (e) {
                                 console.error(`Error calculating metrics for step ${sId}`, e);

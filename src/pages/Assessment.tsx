@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri, calculatePostureJS } from "../lib/postureEngine";
+import type { PostureResult } from "../lib/postureEngine";
 import { Dumbbell, PhoneCall, Play, Pause, XCircle, Send } from "lucide-react";
 import type { Landmark } from "../components/VisionEngine";
 
@@ -8,19 +10,6 @@ const VisionEngine = lazy(() => import("../components/VisionEngine"));
 import Peer, { MediaConnection } from "peerjs";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../contexts/AuthContext";
-
-interface Metric {
-    label: string;
-    value: number;
-    unit: string;
-    passed: boolean;
-}
-
-interface PostureResult {
-    metrics: Metric[];
-    passed: boolean;
-    score: number;
-}
 
 const ASSESSMENT_STEPS = [
     { id: 1, title: 'Standing Naturally', subtitle: 'Evaluates vertical alignment and shoulder symmetry.', videoUrl: 'https://cdn.pixabay.com/video/2021/08/21/85806-591583566_tiny.mp4' },
@@ -333,21 +322,29 @@ export default function Assessment() {
         try {
             if (landmarks.length < 33) return;
 
-            const postureResult: PostureResult = await invoke("calculate_posture", {
-                landmarks,
-                stepId: currentStep
-            });
+            let postureResult: PostureResult;
+
+            if (isTauri()) {
+                // Desktop: use the high-performance Rust backend via IPC
+                postureResult = await invoke<PostureResult>("calculate_posture", {
+                    landmarks,
+                    stepId: currentStep
+                });
+            } else {
+                // Browser: use the TypeScript mirror of the same algorithm
+                postureResult = calculatePostureJS(landmarks, currentStep);
+            }
+
             setResult(postureResult);
 
             if (sequenceMode && phase === 'capture') {
-                // Batch landmarks in memory instead of heavy network calls
                 frameBatchRef.current.push({
                     timestampMs: Date.now(),
                     landmarks: landmarks
                 });
             }
         } catch (e: any) {
-            console.error("Rust Invocation Error: ", e);
+            console.error("Posture Engine Error: ", e);
             setError(e.toString());
         }
     }, [activeStep, sequenceMode, phase]);
