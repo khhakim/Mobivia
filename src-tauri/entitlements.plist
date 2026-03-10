@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow outgoing network connections (required for Supabase HTTP + WebSocket) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Allow incoming connections (required for PeerJS WebRTC telehealth) -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <!-- Allow camera access -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <!-- Allow microphone access -->
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+</dict>
+</plist>
