@@ -1172,8 +1172,16 @@ export default function DoctorDashboard() {
                                     }>
                                         <Canvas camera={{ position: [0, 1, 4], fov: 50 }}>
                                             <color attach="background" args={['#f1f5f9']} />
-                                            <ambientLight intensity={0.5} />
-                                            <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
+
+                                            {/* 3-point lighting rig — replaces Environment HDR */}
+                                            <ambientLight intensity={0.8} />
+                                            <hemisphereLight args={['#dbeafe', '#94a3b8', 0.6]} />
+                                            {/* Key light (front-top-right) */}
+                                            <directionalLight position={[5, 8, 5]} intensity={1.4} castShadow />
+                                            {/* Fill light (front-left) */}
+                                            <directionalLight position={[-4, 4, 3]} intensity={0.6} />
+                                            {/* Rim/back light */}
+                                            <directionalLight position={[0, 4, -6]} intensity={0.4} />
 
                                             {showSkeleton && <CustomModel landmarks={patientLandmarks} showAngles={showAngles} showAxis={showAxis} />}
 
