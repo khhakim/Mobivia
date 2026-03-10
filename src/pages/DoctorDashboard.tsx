@@ -121,6 +121,17 @@ const CustomModel = ({ landmarks, showAngles, showAxis }: { landmarks?: Landmark
     // Load the custom low-poly model from the public folder
     const { scene } = useGLTF('/human_model.glb');
 
+    // Override the GLB's original material (which is near-black) with a neutral light gray
+    useEffect(() => {
+        const mat = new THREE.MeshStandardMaterial({ color: '#b0bec5', roughness: 0.7, metalness: 0.05 });
+        scene.traverse((obj: any) => {
+            if (obj.isMesh) {
+                obj.material = mat;
+                obj.castShadow = true;
+            }
+        });
+    }, [scene]);
+
     const initialLocalQuats = useRef<Record<string, THREE.Quaternion>>({});
 
     // In a real application, landmarks would be streamed via WebRTC or global state from VisionEngine
@@ -1173,15 +1184,16 @@ export default function DoctorDashboard() {
                                         <Canvas camera={{ position: [0, 1, 4], fov: 50 }}>
                                             <color attach="background" args={['#f1f5f9']} />
 
-                                            {/* 3-point lighting rig — replaces Environment HDR */}
-                                            <ambientLight intensity={0.8} />
-                                            <hemisphereLight args={['#dbeafe', '#94a3b8', 0.6]} />
-                                            {/* Key light (front-top-right) */}
-                                            <directionalLight position={[5, 8, 5]} intensity={1.4} castShadow />
-                                            {/* Fill light (front-left) */}
-                                            <directionalLight position={[-4, 4, 3]} intensity={0.6} />
-                                            {/* Rim/back light */}
-                                            <directionalLight position={[0, 4, -6]} intensity={0.4} />
+                                            {/* Front-focused lighting rig */}
+                                            <ambientLight intensity={1.2} />
+                                            {/* Primary front light — directly toward viewer */}
+                                            <directionalLight position={[0, 1, 6]} intensity={2.0} />
+                                            {/* Front-left fill */}
+                                            <directionalLight position={[-3, 2, 5]} intensity={0.8} />
+                                            {/* Front-right fill */}
+                                            <directionalLight position={[3, 2, 5]} intensity={0.8} />
+                                            {/* Soft top light */}
+                                            <directionalLight position={[0, 8, 2]} intensity={0.4} castShadow />
 
                                             {showSkeleton && <CustomModel landmarks={patientLandmarks} showAngles={showAngles} showAxis={showAxis} />}
 
