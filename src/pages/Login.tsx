@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { User, Stethoscope } from "lucide-react";
+import { User, Stethoscope } from 'lucide-react';
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -12,6 +12,8 @@ export default function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [fullName, setFullName] = useState('');
+    const [age, setAge] = useState('');
+    const [doctorId, setDoctorId] = useState('');
     const [role, setRole] = useState<'Doctor' | 'Patient'>('Patient');
     const [loading, setLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
@@ -46,6 +48,8 @@ export default function Login() {
                         data: {
                             full_name: fullName,
                             role: role,
+                            age: role === 'Patient' && age ? parseInt(age) : null,
+                            doctor_id: role === 'Doctor' ? doctorId : null,
                         }
                     }
                 });
@@ -64,110 +68,191 @@ export default function Login() {
     };
 
     if (isLoading) {
-        return <div className="min-h-screen flex items-center justify-center bg-[#f2f2f7]">Loading...</div>;
+        return <div className="min-h-screen flex items-center justify-center bg-white font-sans text-slate-500">Loading...</div>;
     }
 
     return (
-        <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center font-sans p-4">
-            <div className="bg-white p-10 rounded-[2rem] shadow-xl max-w-lg w-full text-center border border-slate-100">
-                <div className="w-16 h-16 rounded-xl bg-sky-500 flex items-center justify-center mx-auto text-white font-bold text-3xl shadow-sm mb-6">
-                    M
+        <div className="min-h-screen bg-white flex font-sans leading-normal">
+            {/* Left Panel - Branding */}
+            <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden bg-gradient-to-br from-[#3b5bdb] via-[#2f4bc2] to-[#1c30a6] text-white p-16 flex-col justify-between">
+                {/* Decorative background lines/curves */}
+                <div className="absolute inset-0 opacity-20 pointer-events-none">
+                    <svg className="absolute w-[200%] h-[200%] -top-[50%] -left-[50%]" viewBox="0 0 100 100" preserveAspectRatio="none">
+                        <path d="M 0 100 Q 50 20 100 100" fill="none" stroke="white" strokeWidth="0.1" className="opacity-30" />
+                        <path d="M 10 100 Q 60 10 100 90" fill="none" stroke="white" strokeWidth="0.1" className="opacity-40" />
+                        <path d="M 20 100 Q 70 0 100 80" fill="none" stroke="white" strokeWidth="0.1" className="opacity-50" />
+                        <path d="M 30 100 Q 80 -10 100 70" fill="none" stroke="white" strokeWidth="0.1" className="opacity-60" />
+                    </svg>
                 </div>
-                <h1 className="text-3xl font-bold text-slate-900 mb-2">Welcome to Mobivia</h1>
-                <p className="text-slate-500 mb-8">
-                    {isLogin ? 'Sign in to your account' : 'Create a new account'}
-                </p>
 
-                {errorMsg && (
-                    <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm mb-6 text-left border border-red-100">
-                        {errorMsg}
-                    </div>
-                )}
+                <div className="relative z-10 flex flex-col items-start text-left pt-12">
+                    <img src="/logo.png" alt="Mobivia Logo" className="w-24 h-24 mb-16 object-cover rounded-full shadow-md" />
 
-                <form onSubmit={handleSubmit} className="space-y-4 text-left">
-                    {!isLogin && (
-                        <>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">I am a</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setRole('Patient')}
-                                        className={`flex items-center justify-center space-x-2 py-3 border rounded-xl font-medium transition-all ${role === 'Patient' ? 'bg-sky-500 border-sky-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                                    >
-                                        <User size={18} />
-                                        <span>Patient</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setRole('Doctor')}
-                                        className={`flex items-center justify-center space-x-2 py-3 border rounded-xl font-medium transition-all ${role === 'Doctor' ? 'bg-emerald-500 border-emerald-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                                    >
-                                        <Stethoscope size={18} />
-                                        <span>Doctor</span>
-                                    </button>
-                                </div>
+                    <h1 className="text-6xl font-bold leading-tight mb-6 tracking-tight">
+                        Hello<br />
+                        Mobivia! <span className="inline-block animate-wave">👋🏻</span>
+                    </h1>
+
+                    <p className="text-blue-100 text-xl font-light max-w-md leading-relaxed">
+                        Smarter mobility screening powered by AI. Mobivia analyzes posture, reconstructs patient movement in 3D, and helps doctors detect mobility decline early.
+                    </p>
+                </div>
+
+                <div className="relative z-10 text-blue-200/80 text-sm font-medium tracking-wide">
+                    &copy; 2026 Mobivia. All rights reserved.
+                </div>
+            </div>
+
+            {/* Right Panel - Login Form */}
+            <div className="w-full lg:w-[45%] flex flex-col relative overflow-y-auto">
+                {/* Branding for mobile/top right */}
+                <div className="absolute top-8 left-8 lg:left-16 font-bold text-xl tracking-tight text-slate-900 hidden sm:block">
+                    Mobivia
+                </div>
+
+                <div className="flex-1 flex flex-col justify-center px-6 sm:px-16 lg:px-20 xl:px-28 py-12">
+                    <div className="w-full max-w-md mx-auto">
+                        <h2 className="text-3xl font-bold text-slate-900 mb-2 tracking-tight text-left">
+                            {isLogin ? 'Welcome Back!' : 'Create an Account'}
+                        </h2>
+                        <p className="text-sm text-slate-500 mb-8 leading-relaxed text-left">
+                            {isLogin ? 'Please enter your details to sign in.' : 'Please fill in your details to get started.'}
+                        </p>
+
+                        {errorMsg && (
+                            <div className={`${errorMsg.includes('successful') ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'} p-4 rounded-xl text-sm mb-6 text-left border`}>
+                                {errorMsg}
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+                        )}
+
+                        <form onSubmit={handleSubmit} className="space-y-5">
+                            {!isLogin && (
+                                <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <div className="space-y-1">
+                                        <input
+                                            type="text"
+                                            required
+                                            value={fullName}
+                                            onChange={(e) => setFullName(e.target.value)}
+                                            placeholder="Full Name"
+                                            className="w-full px-4 py-4 bg-white border border-slate-200 focus:bg-white focus:border-[#3b5bdb] focus:ring-4 focus:ring-[#3b5bdb]/10 outline-none transition-all text-slate-800 font-medium placeholder:text-slate-400 placeholder:font-normal rounded-xl"
+                                        />
+                                    </div>
+                                    {role === 'Patient' ? (
+                                        <div className="space-y-1">
+                                            <input
+                                                type="number"
+                                                value={age}
+                                                onChange={(e) => setAge(e.target.value)}
+                                                placeholder="Age"
+                                                min="0"
+                                                max="120"
+                                                required
+                                                className="w-full px-4 py-4 bg-white border border-slate-200 focus:bg-white focus:border-[#3b5bdb] focus:ring-4 focus:ring-[#3b5bdb]/10 outline-none transition-all text-slate-800 font-medium placeholder:text-slate-400 placeholder:font-normal rounded-xl"
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            <input
+                                                type="text"
+                                                value={doctorId}
+                                                onChange={(e) => {
+                                                    // Only allow numbers, max 4 digits
+                                                    const val = e.target.value.replace(/\D/g, '');
+                                                    if (val.length <= 4) setDoctorId(val);
+                                                }}
+                                                placeholder="Doctor ID (4 digits)"
+                                                maxLength={4}
+                                                pattern="\d{4}"
+                                                required
+                                                className="w-full px-4 py-4 bg-white border border-slate-200 focus:bg-white focus:border-[#3b5bdb] focus:ring-4 focus:ring-[#3b5bdb]/10 outline-none transition-all text-slate-800 font-medium placeholder:text-slate-400 placeholder:font-normal rounded-xl"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="space-y-1">
                                 <input
-                                    type="text"
+                                    type="email"
                                     required
-                                    value={fullName}
-                                    onChange={(e) => setFullName(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                                    placeholder="John Doe"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder={!isLogin ? "Email Address" : "patient@mobivia.com"}
+                                    className="w-full px-4 py-4 bg-white border border-slate-200 focus:bg-white focus:border-[#3b5bdb] focus:ring-4 focus:ring-[#3b5bdb]/10 outline-none transition-all text-slate-800 font-medium placeholder:text-slate-400 placeholder:font-normal rounded-xl"
                                 />
                             </div>
-                        </>
-                    )}
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
-                        <input
-                            type="email"
-                            required
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                            placeholder="you@example.com"
-                        />
+                            <div className="space-y-1">
+                                <input
+                                    type="password"
+                                    required
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Password"
+                                    className="w-full px-4 py-4 bg-white border border-slate-200 focus:bg-white focus:border-[#3b5bdb] focus:ring-4 focus:ring-[#3b5bdb]/10 outline-none transition-all text-slate-800 font-medium placeholder:text-slate-400 placeholder:font-normal rounded-xl"
+                                />
+                            </div>
+
+                            {!isLogin && (
+                                <div className="pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">I am a</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRole('Patient')}
+                                            className={`flex items-center justify-center space-x-2 py-3.5 border rounded-xl font-bold transition-all cursor-pointer ${role === 'Patient' ? 'bg-[#3b5bdb] border-[#3b5bdb] text-white shadow-md ring-2 ring-[#3b5bdb]/30 ring-offset-1 scale-[1.02]' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:border-slate-300'}`}
+                                        >
+                                            <User size={18} className={role === 'Patient' ? 'text-white' : 'text-slate-400'} />
+                                            <span>Patient</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRole('Doctor')}
+                                            className={`flex items-center justify-center space-x-2 py-3.5 border rounded-xl font-bold transition-all cursor-pointer ${role === 'Doctor' ? 'bg-[#3b5bdb] border-[#3b5bdb] text-white shadow-md ring-2 ring-[#3b5bdb]/30 ring-offset-1 scale-[1.02]' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:border-slate-300'}`}
+                                        >
+                                            <Stethoscope size={18} className={role === 'Doctor' ? 'text-white' : 'text-slate-400'} />
+                                            <span>Doctor</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="pt-4">
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="w-full bg-[#3b5bdb] hover:bg-[#2f4bc2] text-white py-4 rounded-xl font-bold transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 cursor-pointer disabled:opacity-70 disabled:hover:translate-y-0 flex justify-center items-center"
+                                >
+                                    {loading ? (
+                                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                    ) : isLogin ? 'Login Now' : 'Create Account'}
+                                </button>
+                            </div>
+
+                        </form>
+
+                        <div className="mt-8 text-center pt-2 flex flex-col gap-4">
+                            {isLogin && (
+                                <p className="text-sm text-slate-500">
+                                    Forget password? <a href="#" className="font-bold text-slate-900 hover:text-indigo-600 transition-colors">Click here</a>
+                                </p>
+                            )}
+                            <p className="text-sm text-slate-500">
+                                {isLogin ? (
+                                    <>Don't have an account? <button type="button" onClick={() => setIsLogin(false)} className="font-bold text-slate-900 hover:text-indigo-600 transition-colors ml-1">Sign up</button></>
+                                ) : (
+                                    <>Already have an account? <button type="button" onClick={() => setIsLogin(true)} className="font-bold text-slate-900 hover:text-indigo-600 transition-colors ml-1">Login</button></>
+                                )}
+                            </p>
+                        </div>
                     </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                        <input
-                            type="password"
-                            required
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                            placeholder="••••••••"
-                        />
-                    </div>
-
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full py-4 mt-2 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors disabled:opacity-70 flex justify-center"
-                    >
-                        {loading ? 'Processing...' : isLogin ? 'Sign In' : 'Create Account'}
-                    </button>
-                </form>
-
-                <div className="mt-8 pt-6 border-t border-slate-100">
-                    <p className="text-sm text-slate-500">
-                        {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
-                        <button
-                            type="button"
-                            onClick={() => setIsLogin(!isLogin)}
-                            className="font-bold text-sky-600 hover:text-sky-700"
-                        >
-                            {isLogin ? 'Sign up' : 'Sign in'}
-                        </button>
-                    </p>
                 </div>
             </div>
         </div>
     );
 }
+

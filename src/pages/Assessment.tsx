@@ -1,7 +1,10 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Dumbbell, PhoneCall } from "lucide-react";
-import VisionEngine, { Landmark } from "../components/VisionEngine";
+import { Dumbbell, PhoneCall, Play, Pause, XCircle, Send } from "lucide-react";
+import type { Landmark } from "../components/VisionEngine";
+
+// Lazy load the heavy ML vision engine so it doesn't block the UI thread during tab switching
+const VisionEngine = lazy(() => import("../components/VisionEngine"));
 import Peer, { MediaConnection } from "peerjs";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../contexts/AuthContext";
@@ -36,8 +39,17 @@ export default function Assessment() {
 
     const [, setScores] = useState<number[]>([]);
     const [finalScore, setFinalScore] = useState<number | null>(null);
+    const [isPaused, setIsPaused] = useState<boolean>(false);
 
     const [error, setError] = useState<string | null>(null);
+
+    // Defer vision engine mounting to keep tab animations perfectly smooth
+    const [mountEngine, setMountEngine] = useState(false);
+    useEffect(() => {
+        // Wait 300ms after tab mount before hitting the main thread with WASM/Camera loading
+        const t = setTimeout(() => setMountEngine(true), 300);
+        return () => clearTimeout(t);
+    }, []);
 
     // Guided Sequence State
     const [sequenceMode, setSequenceMode] = useState<boolean>(false);
@@ -45,12 +57,15 @@ export default function Assessment() {
     const [timer, setTimer] = useState<number>(0);
     const [phase, setPhase] = useState<'idle' | 'prepare' | 'capture' | 'complete'>('idle');
 
-    const [assessmentId, setAssessmentId] = useState<string>('');
-    const assessmentIdRef = useRef<string>('');
-    useEffect(() => { assessmentIdRef.current = assessmentId; }, [assessmentId]);
+    // Doctor Alerting State
+    const [doctors, setDoctors] = useState<any[]>([]);
+    const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
+    const [alertStatus, setAlertStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
 
     const { profile } = useAuth();
     const patientIdRef = useRef<string>('');
+    const [pendingSession, setPendingSession] = useState<any>(null);
+    const [isJoiningCall, setIsJoiningCall] = useState(false);
 
     useEffect(() => {
         if (profile?.id) {
@@ -60,6 +75,7 @@ export default function Assessment() {
 
     const timerRef = useRef<number | null>(null);
     const frameBatchRef = useRef<{ timestampMs: number, landmarks: Landmark[] }[]>([]);
+    const allFramesRef = useRef<{ step_id: number, frames_data: any[] }[]>([]);
 
     // WebRTC Telehealth State
     const [peerId, setPeerId] = useState<string>('');
@@ -104,6 +120,119 @@ export default function Assessment() {
         };
     }, []);
 
+    // 0.5 Listen for Doctor Telehealth Sessions
+    useEffect(() => {
+        if (!profile?.id || profile.role !== 'Patient') return;
+
+        const checkPendingSessions = async () => {
+            const { data, error } = await supabase
+                .from('telehealth_sessions')
+                .select('*')
+                .eq('patient_id', profile.id)
+                .eq('status', 'pending')
+                .maybeSingle();
+
+            if (!error && data) {
+                setPendingSession(data);
+            }
+        };
+
+        checkPendingSessions();
+
+        const channel = supabase.channel(`patient_sessions_${profile.id}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'telehealth_sessions', filter: `patient_id=eq.${profile.id}` },
+                (payload) => {
+                    console.log("Telehealth session update:", payload);
+                    if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+                        if (payload.new.status === 'pending') {
+                            setPendingSession(payload.new);
+                        } else if (payload.new.status === 'cancelled' || payload.new.status === 'completed') {
+                            setPendingSession(null);
+                        }
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [profile]);
+
+    // Fetch doctors for the manual "Send to Doctor" dropdown
+    useEffect(() => {
+        const fetchDoctors = async () => {
+            const { data } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('role', 'Doctor');
+            if (data && data.length > 0) {
+                setDoctors(data);
+                setSelectedDoctorId(data[0].id);
+            }
+        };
+        fetchDoctors();
+    }, []);
+
+    const alertDoctor = async () => {
+        if (!selectedDoctorId || !peerId || !profile) {
+            console.warn('alertDoctor missing required data:', { selectedDoctorId, peerId, profileId: profile?.id });
+            return;
+        }
+        setAlertStatus('sending');
+
+        // Step 1: Remove any stale session between this exact pair
+        await supabase
+            .from('telehealth_sessions')
+            .delete()
+            .eq('doctor_id', selectedDoctorId)
+            .eq('patient_id', profile.id)
+            .in('status', ['pending', 'cancelled', 'completed']);
+
+        // Step 2: Insert a fresh pending session with the current peer ID
+        const { data: newSession, error: insertError } = await supabase
+            .from('telehealth_sessions')
+            .insert({
+                doctor_id: selectedDoctorId,
+                patient_id: profile.id,
+                patient_peer_id: peerId,
+                status: 'pending'
+            })
+            .select()
+            .single();
+
+        if (insertError) {
+            console.error('Alert Doctor failed – Supabase error:', insertError);
+            setAlertStatus('idle');
+        } else {
+            console.log('Telehealth session created successfully:', newSession);
+            setAlertStatus('sent');
+            setTimeout(() => setAlertStatus('idle'), 3000);
+        }
+    };
+
+    const joinTelehealthSession = async () => {
+        if (!pendingSession || !peerId) return;
+        setIsJoiningCall(true);
+        const { error: joinError } = await supabase
+            .from('telehealth_sessions')
+            .update({
+                patient_peer_id: peerId,
+                status: 'accepted'
+            })
+            .eq('id', pendingSession.id);
+
+        if (joinError) {
+            console.error("Failed to join session:", joinError);
+            setError("Failed to connect to the doctor. Please try again.");
+        } else {
+            setPendingSession(null); // Hide button after joining
+        }
+        setIsJoiningCall(false);
+    };
+
     // Attach remote stream to video element when it arrives
     useEffect(() => {
         if (remoteVideoRef.current && remoteStream) {
@@ -113,7 +242,7 @@ export default function Assessment() {
 
     // 1. Timer countdown effect
     useEffect(() => {
-        if (!sequenceMode || phase === 'idle' || phase === 'complete') return;
+        if (!sequenceMode || phase === 'idle' || phase === 'complete' || isPaused) return;
 
         timerRef.current = window.setInterval(() => {
             setTimer((prev) => Math.max(0, prev - 1));
@@ -122,11 +251,11 @@ export default function Assessment() {
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, [sequenceMode, phase]);
+    }, [sequenceMode, phase, isPaused]);
 
     // 2. Phase transition effect
     useEffect(() => {
-        if (!sequenceMode || phase === 'idle' || phase === 'complete') return;
+        if (!sequenceMode || phase === 'idle' || phase === 'complete' || isPaused) return;
         if (timer > 0) return; // Only transition when timer hits 0
 
         // Timer hit 0, transition phase
@@ -136,39 +265,49 @@ export default function Assessment() {
         } else if (phase === 'capture') {
             setScores(prevScores => {
                 const newScores = [...prevScores, resultRef.current?.score || 0];
+
+                if (frameBatchRef.current.length > 0) {
+                    allFramesRef.current.push({
+                        step_id: activeStep,
+                        frames_data: [...frameBatchRef.current]
+                    });
+                    frameBatchRef.current = [];
+                }
+
                 if (activeStep === 7) {
                     const avg = newScores.reduce((a, b) => a + b, 0) / 7;
                     setFinalScore(avg);
 
                     const riskLevel = avg >= 80 ? "Low" : avg >= 50 ? "Moderate" : "High";
 
-                    // Update the completed assessment in Supabase
-                    supabase.from("assessments").update({
-                        overall_score: avg,
-                        risk_level: riskLevel,
-                        status: 'completed'
-                    })
-                        .eq('id', assessmentIdRef.current)
-                        .then(({ error }) => {
-                            if (error) console.error("Failed to update assessment in DB", error);
+                    const aid = crypto.randomUUID();
+
+                    if (patientIdRef.current) {
+                        supabase.from("assessments").insert([{
+                            id: aid,
+                            patient_id: patientIdRef.current,
+                            overall_score: avg,
+                            risk_level: riskLevel,
+                            status: 'completed'
+                        }]).then(({ error }) => {
+                            if (error) console.error("Failed to insert assessment", error);
+                            else {
+                                if (allFramesRef.current.length > 0) {
+                                    const framesToInsert = allFramesRef.current.map(f => ({
+                                        assessment_id: aid,
+                                        step_id: f.step_id,
+                                        frames_data: f.frames_data
+                                    }));
+                                    supabase.from('assessment_frames').insert(framesToInsert).then(({ error: err2 }) => {
+                                        if (err2) console.error("Failed to insert frames", err2);
+                                    });
+                                }
+                            }
                         });
+                    }
                 }
                 return newScores;
             });
-
-            // Save batched frames for this step to Supabase
-            if (frameBatchRef.current.length > 0) {
-                const framesToSave = [...frameBatchRef.current];
-                frameBatchRef.current = []; // Clear for next step
-
-                supabase.from('assessment_frames').insert([{
-                    assessment_id: assessmentIdRef.current,
-                    step_id: activeStep,
-                    frames_data: framesToSave
-                }]).then(({ error }) => {
-                    if (error) console.error("Failed to save batched frames", error);
-                });
-            }
 
             if (activeStep < 7) {
                 setPhase('prepare');
@@ -181,12 +320,12 @@ export default function Assessment() {
                 setTimer(0);
             }
         }
-    }, [timer, sequenceMode, phase, activeStep]);
+    }, [timer, sequenceMode, phase, activeStep, isPaused]);
 
     // Hook this callback into VisionEngine so we stream live frames into Rust
     const handlePoseDetected = useCallback(async (landmarks: Landmark[]) => {
         // Only process logic if we are actively capturing, OR if not in sequence mode
-        if (sequenceMode && phase !== 'capture') return;
+        if (sequenceMode && (phase !== 'capture' || isPaused)) return;
 
         // To ensure we don't accidentally send the wrong step due to closure capture, use a ref or depend strictly on activeStep.
         const currentStep = activeStep;
@@ -214,25 +353,28 @@ export default function Assessment() {
     }, [activeStep, sequenceMode, phase]);
 
     const startSequence = () => {
-        const newId = crypto.randomUUID();
-        setAssessmentId(newId);
         setActiveStep(1);
         setResult(null);
         setScores([]);
         setFinalScore(null);
         setSequenceMode(true);
+        setIsPaused(false);
         setPhase('prepare');
         setTimer(15); // 15 secs to prep for step 1
         frameBatchRef.current = [];
+        allFramesRef.current = [];
+    };
 
-        // Insert pending assessment immediately
-        supabase.from('assessments').insert([{
-            id: newId,
-            patient_id: patientIdRef.current,
-            status: 'pending'
-        }]).then(({ error }) => {
-            if (error) console.error("Failed to create pending assessment", error);
-        });
+    const cancelSequence = () => {
+        setSequenceMode(false);
+        setPhase('idle');
+        setIsPaused(false);
+        setTimer(0);
+        setScores([]);
+        setResult(null);
+        setActiveStep(1);
+        frameBatchRef.current = [];
+        allFramesRef.current = [];
     };
     // We don't need the mock test button anymore since the camera streams data!
 
@@ -246,16 +388,58 @@ export default function Assessment() {
                         <h2 className="text-3xl font-bold tracking-tight text-slate-900">Guided Assessment</h2>
 
                         {/* Telehealth Status Badge */}
-                        <div className="mt-2 flex items-center space-x-2">
+                        <div className="mt-4 flex flex-wrap items-center gap-3">
                             {peerId ? (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                <span className="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm">
                                     <PhoneCall size={12} className="mr-1.5" />
                                     Telehealth ID: <b className="ml-1 tracking-wider">{peerId}</b>
                                 </span>
                             ) : (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-500">
+                                <span className="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-slate-100 text-slate-500 shadow-sm">
                                     Generating ID...
                                 </span>
+                            )}
+
+                            {/* Manual Alert Doctor UI */}
+                            {peerId && doctors.length > 0 && !remoteStream && (
+                                <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg p-1 shadow-sm">
+                                    <select
+                                        value={selectedDoctorId}
+                                        onChange={(e) => setSelectedDoctorId(e.target.value)}
+                                        className="text-xs bg-transparent border-none focus:ring-0 text-slate-600 font-medium py-1 pl-2 pr-6"
+                                    >
+                                        {doctors.map(d => (
+                                            <option key={d.id} value={d.id}>Dr. {d.full_name}</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={alertDoctor}
+                                        disabled={alertStatus !== 'idle'}
+                                        className={`flex items-center px-3 py-1.5 rounded text-xs font-bold text-white transition-colors ${alertStatus === 'sent' ? 'bg-emerald-500' : 'bg-sky-500 hover:bg-sky-600'}`}
+                                    >
+                                        {alertStatus === 'sending' ? (
+                                            <span className="animate-pulse">Sending...</span>
+                                        ) : alertStatus === 'sent' ? (
+                                            <span>Sent!</span>
+                                        ) : (
+                                            <>
+                                                <Send size={12} className="mr-1.5" />
+                                                Alert Doctor
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            )}
+
+                            {pendingSession && !remoteStream && (
+                                <button
+                                    onClick={joinTelehealthSession}
+                                    disabled={isJoiningCall || !peerId}
+                                    className="animate-in fade-in slide-in-from-bottom-2 inline-flex items-center px-3 py-1.5 rounded-md text-xs font-bold bg-sky-500 hover:bg-sky-600 text-white shadow-md transition-colors disabled:opacity-50"
+                                >
+                                    <PhoneCall size={14} className="mr-2 animate-pulse" />
+                                    {isJoiningCall ? 'Connecting...' : "Join Doctor's Call"}
+                                </button>
                             )}
 
                             {remoteStream && (
@@ -270,11 +454,30 @@ export default function Assessment() {
                     {!sequenceMode && phase !== 'complete' && (
                         <button
                             onClick={startSequence}
-                            className="px-6 py-3 bg-slate-900 text-white rounded-full font-bold hover:bg-slate-800 transition-colors shadow-md flex items-center space-x-2"
+                            className="px-6 py-3 bg-[#3b5bdb] border border-[#3b5bdb] text-white rounded-[1.25rem] font-bold hover:bg-[#2f4bc2] transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 flex items-center space-x-2"
                         >
                             <Dumbbell size={18} />
                             <span>Start Live Sequence</span>
                         </button>
+                    )}
+
+                    {sequenceMode && phase !== 'complete' && (
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setIsPaused(!isPaused)}
+                                className={`px-5 py-2.5 rounded-full font-bold transition-all shadow-sm flex items-center space-x-2 ${isPaused ? 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                            >
+                                {isPaused ? <Play size={16} className="fill-current" /> : <Pause size={16} className="fill-current" />}
+                                <span>{isPaused ? 'Resume' : 'Pause'}</span>
+                            </button>
+                            <button
+                                onClick={cancelSequence}
+                                className="px-5 py-2.5 bg-rose-50 border border-rose-100 text-rose-600 rounded-full font-bold hover:bg-rose-100 transition-colors shadow-sm flex items-center space-x-2"
+                            >
+                                <XCircle size={16} />
+                                <span>Cancel</span>
+                            </button>
+                        </div>
                     )}
 
                     {phase === 'complete' && (
@@ -341,10 +544,28 @@ export default function Assessment() {
                             </div>
                         </div>
                     )}
-                    <VisionEngine
-                        onPoseDetected={handlePoseDetected}
-                        onStreamAllocated={(stream) => setLocalStream(stream)}
-                    />
+                    {mountEngine ? (
+                        <Suspense fallback={
+                            <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 backdrop-blur-sm z-20 rounded-[2rem]">
+                                <div className="text-center space-y-4">
+                                    <div className="w-12 h-12 border-4 border-t-sky-500 border-slate-200 rounded-full animate-spin mx-auto text-sky-500"></div>
+                                    <p className="text-sky-700 font-bold animate-pulse text-sm tracking-wider uppercase">Loading Vision Engine...</p>
+                                </div>
+                            </div>
+                        }>
+                            <VisionEngine
+                                onPoseDetected={handlePoseDetected}
+                                onStreamAllocated={(stream) => setLocalStream(stream)}
+                            />
+                        </Suspense>
+                    ) : (
+                        <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 backdrop-blur-sm z-20 rounded-[2rem]">
+                            <div className="text-center space-y-4">
+                                <div className="w-12 h-12 border-4 border-t-sky-500 border-slate-200 rounded-full animate-spin mx-auto text-sky-500"></div>
+                                <p className="text-sky-700 font-bold animate-pulse text-sm tracking-wider uppercase">Preparing Camera...</p>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Telehealth Overlaid Doctor Video */}
                     {remoteStream && (
@@ -375,7 +596,7 @@ export default function Assessment() {
                                         setActiveStep(step.id);
                                         setResult(null);
                                     }}
-                                    className={`rounded-2xl p-5 border relative overflow-hidden flex flex-col justify-between transition-all ${isActive ? 'bg-sky-50 border-sky-100 shadow-sm' : 'bg-white border-slate-100 hover:shadow-md'} ${sequenceMode ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                    className={`rounded-[1.25rem] p-6 border relative overflow-hidden flex flex-col justify-between transition-all ${isActive ? 'bg-sky-50 outline outline-2 outline-sky-500 border-transparent shadow-sm' : 'bg-white border-slate-100 hover:shadow-md hover:-translate-y-0.5'} ${sequenceMode ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                 >
                                     {isActive && <div className="absolute -top-6 -right-6 w-24 h-24 bg-sky-100 rounded-full opacity-50"></div>}
                                     <div className="relative z-10 mb-4">

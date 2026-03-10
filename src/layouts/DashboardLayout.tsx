@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
-import { Home, ClipboardList, TrendingUp, Dumbbell, User, LogOut } from "lucide-react";
+import { Home, ClipboardList, TrendingUp, Dumbbell, User, LogOut, Video } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function DashboardLayout() {
@@ -10,18 +10,19 @@ export default function DashboardLayout() {
     const navLinks = [
         { name: "Home", path: "/dashboard/home", icon: Home },
         { name: "Assessment", path: "/dashboard/assessment", icon: ClipboardList },
+        { name: "Telehealth", path: "/dashboard/telehealth", icon: Video },
         { name: "Progress", path: "/dashboard/progress", icon: TrendingUp },
         { name: "Exercises", path: "/dashboard/exercises", icon: Dumbbell },
         { name: "Profile", path: "/dashboard/profile", icon: User },
     ];
 
     return (
-        <div className="min-h-screen bg-[#f2f2f7] flex font-sans text-slate-900">
+        <div className="h-screen w-full bg-[#f2f2f7] flex font-sans text-slate-900 overflow-hidden">
             {/* Sidebar Navigation */}
-            <aside className="w-64 bg-white border-r border-slate-200 flex flex-col hidden md:flex">
+            <aside className="w-64 bg-white border-r border-slate-200 flex flex-col hidden md:flex h-full flex-shrink-0">
                 <div className="p-6 flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded bg-sky-500 flex items-center justify-center text-white font-bold text-xl shadow-sm">
-                        M
+                    <div className="w-8 h-8 flex items-center justify-center overflow-hidden rounded-full shadow-sm">
+                        <img src="/logo.png" alt="Mobivia Logo" className="w-full h-full object-cover" />
                     </div>
                     <span className="text-xl font-bold tracking-tight text-slate-800">Mobivia</span>
                 </div>
@@ -70,9 +71,11 @@ export default function DashboardLayout() {
             </aside>
 
             {/* Main Content Dashboard */}
-            <main className="flex-1 px-8 py-10 max-w-7xl mx-auto flex flex-col lg:flex-row gap-8 overflow-y-auto w-full">
-                <Outlet />
-            </main>
+            <div className="flex-1 h-full overflow-y-auto relative w-full">
+                <main className="px-4 md:px-8 py-10 max-w-7xl mx-auto flex flex-col lg:flex-row gap-8 w-full">
+                    <Outlet />
+                </main>
+            </div>
         </div>
     );
 }

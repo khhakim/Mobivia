@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
-import { Phone, PhoneOff, Video, ArrowLeft, Mic, MicOff, VideoOff } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { PhoneOff, Video, ArrowLeft, Mic, MicOff, VideoOff } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
 import Peer, { MediaConnection } from "peerjs";
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
 import { Landmark } from "../components/VisionEngine";
@@ -129,8 +131,11 @@ useGLTF.preload('/human_model.glb');
 
 export default function TelehealthConsultation() {
     const navigate = useNavigate();
+    const { patientId } = useParams();
+    const { profile } = useAuth();
     const [patientTelehealthId, setPatientTelehealthId] = useState('');
     const [telehealthStatus, setTelehealthStatus] = useState<'idle' | 'calling' | 'connected' | 'error'>('idle');
+    const [isPeerReady, setIsPeerReady] = useState(false);
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const peerInstance = useRef<Peer | null>(null);
@@ -154,6 +159,10 @@ export default function TelehealthConsultation() {
         const peer = new Peer();
         peerInstance.current = peer;
 
+        peer.on('open', () => {
+            setIsPeerReady(true);
+        });
+
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then((stream) => setLocalStream(stream))
             .catch((err) => {
@@ -168,6 +177,52 @@ export default function TelehealthConsultation() {
             }
         };
     }, []);
+
+    // 1.5 Pick up pending Patient Request
+    useEffect(() => {
+        if (!patientId || !profile || profile.role !== 'Doctor') return;
+
+        let activeSessionId: string | null = null;
+
+        const checkIncomingRequest = async () => {
+            const { data, error } = await supabase
+                .from('telehealth_sessions')
+                .select('*')
+                .eq('doctor_id', profile.id)
+                .eq('patient_id', patientId)
+                .eq('status', 'pending')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (error && error.code !== 'PGRST116') {
+                console.error("Error checking incoming request:", error);
+            }
+
+            if (data && data.patient_peer_id) {
+                activeSessionId = data.id;
+                setPatientTelehealthId(data.patient_peer_id);
+
+                // Alert the patient that we are now "accepted" (opening our UI)
+                await supabase
+                    .from('telehealth_sessions')
+                    .update({ status: 'accepted' })
+                    .eq('id', data.id);
+            }
+        };
+
+        checkIncomingRequest();
+
+        return () => {
+            if (activeSessionId) {
+                // If we unmount before completing, mark cancelled so the patient page resets
+                supabase.from('telehealth_sessions')
+                    .update({ status: 'cancelled' })
+                    .eq('id', activeSessionId)
+                    .then(() => console.log('Session marked cancelled on unmount'));
+            }
+        };
+    }, [patientId, profile]);
 
     // 2. Setup AI Vision tracking for the patient's remote video feed
     useEffect(() => {
@@ -218,19 +273,26 @@ export default function TelehealthConsultation() {
         }
     }, [remoteStream]);
 
-    const handleCallPatient = () => {
-        if (!peerInstance.current || !localStream || !patientTelehealthId) return;
+    // 4. Function to start the call
+    const handleCallPatient = useCallback(() => {
+        if (!peerInstance.current || !patientTelehealthId || !localStreamRef.current) {
+            console.warn("Missing peer instance, patient ID, or local stream");
+            return;
+        }
 
         setTelehealthStatus('calling');
-        const call = peerInstance.current.call(patientTelehealthId, localStream);
+        const call = peerInstance.current.call(patientTelehealthId, localStreamRef.current);
 
-        call.on('stream', (userVideoStream) => {
-            setRemoteStream(userVideoStream);
+        call.on('stream', (rStream) => {
+            setRemoteStream(rStream);
             setTelehealthStatus('connected');
         });
 
         call.on('close', () => {
-            handleEndCall();
+            setRemoteStream(null);
+            setTelehealthStatus('idle');
+            // Clean up patient peer ID so we don't auto-reconnect unintentionally
+            setPatientTelehealthId('');
         });
 
         call.on('error', (err) => {
@@ -239,7 +301,19 @@ export default function TelehealthConsultation() {
         });
 
         currentCall.current = call;
-    };
+    }, [patientTelehealthId, localStreamRef, peerInstance]); // Added peerInstance to dependencies
+
+    // 4.5 Auto-Dial Patient when constraints are met
+    useEffect(() => {
+        if (isPeerReady && patientTelehealthId && localStream && telehealthStatus === 'idle') {
+            console.log("Auto-dialing patient:", patientTelehealthId);
+            // Small delay ensures signaling server registration is stabilized before outbound call
+            const timer = setTimeout(() => {
+                handleCallPatient();
+            }, 800);
+            return () => clearTimeout(timer);
+        }
+    }, [isPeerReady, patientTelehealthId, localStream, telehealthStatus, handleCallPatient]);
 
     const handleEndCall = () => {
         if (currentCall.current) {
@@ -295,19 +369,32 @@ export default function TelehealthConsultation() {
                     </div>
 
                     {telehealthStatus === 'idle' || telehealthStatus === 'error' ? (
-                        <div className="flex space-x-2">
+                        <div className="flex items-center space-x-3 bg-slate-900/50 p-1.5 rounded-xl border border-white/10">
                             <input
                                 type="text"
+                                placeholder="Paste Patient ID here"
                                 value={patientTelehealthId}
                                 onChange={(e) => setPatientTelehealthId(e.target.value)}
-                                placeholder="Patient ID..."
-                                className="bg-slate-900 border border-white/20 rounded-lg px-3 py-1 text-sm focus:outline-none focus:border-sky-500"
+                                className="bg-slate-900 border border-white/20 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500 hidden md:block w-48"
                             />
                             <button
                                 onClick={handleCallPatient}
-                                className="bg-sky-600 hover:bg-sky-700 text-white rounded-lg px-4 py-1.5 text-sm font-bold transition-colors flex items-center shadow-md"
+                                disabled={!isPeerReady || !patientTelehealthId}
+                                className="bg-sky-600 hover:bg-sky-700 text-white rounded-lg px-4 py-1.5 text-sm font-bold transition-colors flex items-center shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                <Phone size={14} className="mr-2" /> Connect
+                                Connect
+                            </button>
+                        </div>
+                    ) : telehealthStatus === 'calling' ? (
+                        <div className="flex items-center space-x-3 bg-slate-900/50 p-1.5 rounded-xl border border-white/10">
+                            <div className="flex items-center text-amber-500 px-4 py-1 text-sm font-bold animate-pulse">
+                                Calling Patient...
+                            </div>
+                            <button
+                                onClick={handleEndCall}
+                                className="bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white rounded-lg px-3 py-1 text-xs font-bold transition-colors"
+                            >
+                                Cancel
                             </button>
                         </div>
                     ) : (

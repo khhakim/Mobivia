@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-    Dumbbell, Clock, ChevronRight, Play, Star, Flame, Filter,
+    Dumbbell, Clock, Play, Star, Flame, Filter,
     Wind, Zap, Shield, Heart, CheckCircle2
 } from "lucide-react";
 
@@ -232,9 +232,6 @@ export default function Exercises() {
                                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 ${isCompleted ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-md"}`}
                                 >
                                     {isCompleted ? <><CheckCircle2 size={16} /> Done!</> : <><Play size={14} className="fill-white" /> Start</>}
-                                </button>
-                                <button className="flex items-center justify-center w-10 h-10 rounded-xl border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 transition-colors">
-                                    <ChevronRight size={18} />
                                 </button>
                             </div>
                         </div>

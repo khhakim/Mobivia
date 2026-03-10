@@ -92,25 +92,25 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
             let head_tilt = (ear_dy / ear_dx.abs()).atan().to_degrees().abs();
 
             max_deviation = spine_angle.max(shoulder_symmetry).max(head_tilt);
-            passed = max_deviation < 5.0;
+            passed = max_deviation < 10.0; // Widened from 5° to 10°
 
             metrics.push(Metric {
                 label: "Spine Angle".into(),
                 value: spine_angle,
                 unit: "°".into(),
-                passed: spine_angle < 5.0,
+                passed: spine_angle < 10.0,
             });
             metrics.push(Metric {
                 label: "Shoulder Symmetry".into(),
                 value: shoulder_symmetry,
                 unit: "°".into(),
-                passed: shoulder_symmetry < 5.0,
+                passed: shoulder_symmetry < 10.0,
             });
             metrics.push(Metric {
                 label: "Head Tilt".into(),
                 value: head_tilt,
                 unit: "°".into(),
-                passed: head_tilt < 5.0,
+                passed: head_tilt < 10.0,
             });
         }
         2 => {
@@ -129,19 +129,19 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
             let avg_thigh_slope = (left_thigh_slope_dev + right_thigh_slope_dev) / 2.0;
 
             max_deviation = spine_angle.max(avg_thigh_slope);
-            passed = max_deviation < 15.0; // Broadened tolerance
+            passed = max_deviation < 25.0; // Broadened tolerance
 
             metrics.push(Metric {
                 label: "Spine Verticality".into(),
                 value: spine_angle,
                 unit: "°".into(),
-                passed: spine_angle < 15.0,
+                passed: spine_angle < 25.0,
             });
             metrics.push(Metric {
                 label: "Thigh Alignment".into(),
                 value: avg_thigh_slope,
                 unit: "u".into(),
-                passed: avg_thigh_slope < 15.0,
+                passed: avg_thigh_slope < 25.0,
             });
             metrics.push(Metric {
                 label: "Seated Valid".into(),
@@ -159,20 +159,20 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
             let right_reach_y_dev = (right_wrist.y - right_shoulder.y).abs() * 100.0;
             let avg_reach_y = (left_reach_y_dev + right_reach_y_dev) / 2.0;
 
-            max_deviation = avg_reach_y;
-            passed = max_deviation < 20.0;
+            max_deviation = avg_reach_y.min(25.0); // Cap so score never hits 0
+            passed = avg_reach_y < 35.0; // Widened threshold
 
             metrics.push(Metric {
                 label: "Reach Level".into(),
                 value: avg_reach_y,
                 unit: "dev".into(),
-                passed: avg_reach_y < 20.0,
+                passed: avg_reach_y < 35.0,
             });
             metrics.push(Metric {
                 label: "Arm Symmetry".into(),
                 value: (left_reach_y_dev - right_reach_y_dev).abs(),
                 unit: "dev".into(),
-                passed: (left_reach_y_dev - right_reach_y_dev).abs() < 10.0,
+                passed: (left_reach_y_dev - right_reach_y_dev).abs() < 15.0,
             });
             metrics.push(Metric {
                 label: "Target Reached".into(),
@@ -188,25 +188,26 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
             let right_overhead_ext = (right_shoulder.y - right_wrist.y) * 100.0;
             let avg_overhead = (left_overhead_ext + right_overhead_ext) / 2.0;
 
-            // We want this value to be high. Let's say reaching 30 units above is "passed"
-            passed = avg_overhead > 30.0;
+            // Pass = wrists meaningfully above shoulders (>10 units)
+            passed = avg_overhead > 10.0;
             max_deviation = if passed {
                 0.0
             } else {
-                30.0 - avg_overhead.max(0.0)
+                // Cap at 25 so score never bottoms out at 0 for a near-miss
+                (10.0 - avg_overhead.max(-15.0)).min(25.0)
             };
 
             metrics.push(Metric {
                 label: "Overhead Extension".into(),
                 value: avg_overhead,
                 unit: "u".into(),
-                passed: avg_overhead > 30.0,
+                passed: avg_overhead > 10.0,
             });
             metrics.push(Metric {
                 label: "Arm Symmetry".into(),
                 value: (left_overhead_ext - right_overhead_ext).abs(),
                 unit: "u".into(),
-                passed: (left_overhead_ext - right_overhead_ext).abs() < 10.0,
+                passed: (left_overhead_ext - right_overhead_ext).abs() < 15.0,
             });
             metrics.push(Metric {
                 label: "Target Reached".into(),
@@ -224,8 +225,12 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
 
             // The goal is to maximize this during the bend, or check range of motion
             // We just feedback the current max bend
-            passed = spine_angle > 15.0; // Assume good bend if > 15 deg
-            max_deviation = if passed { 0.0 } else { 15.0 - spine_angle };
+            passed = spine_angle > 8.0; // Lowered target: >8° counts as a good bend
+            max_deviation = if passed {
+                0.0
+            } else {
+                (8.0 - spine_angle).min(20.0)
+            };
 
             metrics.push(Metric {
                 label: "Spine Lateral Bend".into(),
@@ -284,7 +289,9 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
         }
     }
 
-    let score = (100.0 - (max_deviation * 5.0)).clamp(0.0, 100.0);
+    // Softened penalty: multiplier reduced from 5.0 → 2.0 so small deviations
+    // don't catastrophically tank the score for a capable patient.
+    let score = (100.0 - (max_deviation * 2.0)).clamp(0.0, 100.0);
 
     Ok(PostureResult {
         metrics,

@@ -90,9 +90,19 @@ export default function VisionEngine({ onPoseDetected, onStreamAllocated }: Visi
         initMediaPipe();
 
         return () => {
-            // Cleanup
-            if (camera) camera.stop();
-            if (poseLandmarker) poseLandmarker.close();
+            // Asynchronous cleanup so unmounting the component (switching tabs) doesn't freeze the main UI thread
+            setTimeout(() => {
+                const stream = videoRef.current?.srcObject as MediaStream;
+                if (stream) {
+                    stream.getTracks().forEach(t => t.stop());
+                }
+                if (camera) {
+                    try { camera.stop(); } catch (e) { console.warn("Camera stop error", e); }
+                }
+                if (poseLandmarker) {
+                    try { poseLandmarker.close(); } catch (e) { console.warn("MediaPipe model close error", e); }
+                }
+            }, 100);
         };
     }, []);
 

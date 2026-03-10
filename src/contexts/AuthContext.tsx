@@ -7,6 +7,8 @@ type Profile = {
     role: 'Doctor' | 'Patient';
     full_name: string | null;
     age: number | null;
+    phone: string | null;
+    location: string | null;
 };
 
 type AuthContextType = {
