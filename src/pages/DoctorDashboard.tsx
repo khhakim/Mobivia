@@ -453,11 +453,11 @@ export default function DoctorDashboard() {
 
                 if (data && data.length > 0) {
                     setTrendData(() => {
-                        const history = data.map((h, index) => {
+                        const history = data.map((h) => {
                             const date = new Date(h.created_at);
-                            const month = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                            const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                             return {
-                                date: `${month}, ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} [${index}]`,
+                                date: label,
                                 score: Math.round(h.overall_score)
                             };
                         });

@@ -1,0 +1,60 @@
+name: macOS Release
+
+on:
+  push:
+    tags:
+      - 'v*-mac'   # Only triggers on tags like v0.1.1-mac, v1.0.0-mac
+  workflow_dispatch: # Also allows manual trigger from GitHub Actions UI
+
+jobs:
+  build-macos:
+    name: Build macOS (Universal)
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Set up Rust (Universal targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and release (macOS Universal)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Mobivia ${{ github.ref_name }} — macOS'
+          releaseBody: |
+            ## macOS Release — ${{ github.ref_name }}
+
+            This is a **macOS-specific** build of Mobivia (Universal Binary — works on both Intel and Apple Silicon).
+
+            ### macOS Notes
+            - **Camera access**: The app will prompt for camera permission on first launch — this is required for the AI posture analysis engine.
+            - **Microphone access**: Also requested for Telehealth video consultations.
+            - If macOS blocks the app on first open: right-click the `.app` and choose **Open**, then confirm.
+
+            ### Download
+            - `Mobivia_x.x.x_universal.dmg` — drag to Applications and run
+          releaseDraft: true
+          prerelease: false
+          args: '--target universal-apple-darwin'
