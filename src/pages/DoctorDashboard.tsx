@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, Suspense, Component } from 'react';
 import {
     Users, Activity, FileText, Settings, Video, Download, CheckCircle, AlertTriangle, XCircle, LogOut, Play, Pause, Info, Phone, Inbox
 } from 'lucide-react';
@@ -7,11 +7,34 @@ import AccountSettings from '../components/AccountSettings';
 import { Landmark } from "../components/VisionEngine";
 import { LineChart, Line as RechartsLine, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from 'recharts';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Grid, Environment, useGLTF, Line as ThreeLine, Html } from '@react-three/drei';
+import { OrbitControls, Grid, useGLTF, Line as ThreeLine, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { invoke } from '@tauri-apps/api/core';
+
+// Error boundary to prevent Three.js/Canvas crashes from blanking the whole page
+class ThreeErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
+    constructor(props: any) {
+        super(props);
+        this.state = { hasError: false };
+    }
+    static getDerivedStateFromError() { return { hasError: true }; }
+    componentDidCatch(err: any) { console.error('3D Engine error:', err); }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="w-full h-full flex items-center justify-center bg-slate-100">
+                    <div className="text-center p-6">
+                        <p className="text-slate-500 font-medium">3D viewer unavailable</p>
+                        <p className="text-slate-400 text-sm mt-1">WebGL may not be supported on this device.</p>
+                    </div>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 interface Metric {
     label: string;
@@ -1141,18 +1164,25 @@ export default function DoctorDashboard() {
 
                             {/* Canvas Viewport (Right Side or Full) */}
                             <div className="flex-1 relative cursor-grab active:cursor-grabbing w-full h-full">
-                                <Canvas camera={{ position: [0, 1, 4], fov: 50 }}>
-                                    <color attach="background" args={['#f1f5f9']} />
-                                    <ambientLight intensity={0.5} />
-                                    <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
+                                <ThreeErrorBoundary>
+                                    <Suspense fallback={
+                                        <div className="w-full h-full flex items-center justify-center bg-slate-100">
+                                            <div className="w-8 h-8 border-4 border-t-sky-400 border-slate-200 rounded-full animate-spin" />
+                                        </div>
+                                    }>
+                                        <Canvas camera={{ position: [0, 1, 4], fov: 50 }}>
+                                            <color attach="background" args={['#f1f5f9']} />
+                                            <ambientLight intensity={0.5} />
+                                            <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
 
-                                    {showSkeleton && <CustomModel landmarks={patientLandmarks} showAngles={showAngles} showAxis={showAxis} />}
+                                            {showSkeleton && <CustomModel landmarks={patientLandmarks} showAngles={showAngles} showAxis={showAxis} />}
 
-                                    {/* Grid Floor */}
-                                    <Grid infiniteGrid fadeDistance={20} sectionColor="#cbd5e1" cellColor="#e2e8f0" position={[0, -1, 0]} />
-                                    <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
-                                    <Environment preset="city" />
-                                </Canvas>
+                                            {/* Grid Floor */}
+                                            <Grid infiniteGrid fadeDistance={20} sectionColor="#cbd5e1" cellColor="#e2e8f0" position={[0, -1, 0]} />
+                                            <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
+                                        </Canvas>
+                                    </Suspense>
+                                </ThreeErrorBoundary>
 
                                 {/* Overlay HUD Controls */}
                                 <div className="absolute top-4 right-4 flex flex-col gap-2">
