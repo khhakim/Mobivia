@@ -300,8 +300,6 @@ fn calculate_posture(landmarks: Vec<Landmark>, step_id: u8) -> Result<PostureRes
     })
 }
 
-// --- Database Commands removed (Using Supabase on frontend) ---
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

@@ -1,0 +1,84 @@
+name: Release Mobivia
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0, v0.2.0, etc.
+
+jobs:
+  release:
+    permissions:
+      contents: write  # Required to create GitHub Releases
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'    # macOS → produces .dmg & .app
+            args: '--target universal-apple-darwin'
+          - platform: 'ubuntu-22.04'   # Linux → produces .AppImage & .deb
+            args: ''
+          - platform: 'windows-latest'  # Windows → produces .exe & .msi
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      # 1. Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Install system dependencies (Linux only)
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      # 3. Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      # 4. Set up Rust toolchain
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Required for the universal macOS binary (Intel + Apple Silicon)
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # 5. Cache Rust/Cargo dependencies for faster builds
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      # 6. Install npm dependencies
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # 7. Build and bundle the app, then publish to GitHub Releases
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Mobivia ${{ github.ref_name }}'
+          releaseBody: |
+            ## What's new in ${{ github.ref_name }}
+
+            See the full changelog in the commit history.
+
+            ### Downloads
+            - **Windows**: `.exe` or `.msi` installer
+            - **macOS**: `.dmg` disk image (Universal — works on Intel & Apple Silicon)
+            - **Linux**: `.AppImage` (portable) or `.deb` package
+          releaseDraft: true   # Creates as a Draft first so you can review before publishing
+          prerelease: false
+          args: ${{ matrix.args }}
