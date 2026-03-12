@@ -47,26 +47,31 @@ export default function DashboardLayout() {
                     })}
                 </nav>
 
-                <div className="p-4 border-t border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold">
-                            {profile?.full_name?.substring(0, 2).toUpperCase() || 'P'}
+                <div className="p-4 border-t border-slate-100 flex flex-col space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold">
+                                {profile?.full_name?.substring(0, 2).toUpperCase() || 'P'}
+                            </div>
+                            <div>
+                                <p className="text-sm font-bold text-slate-800">{profile?.full_name || 'Patient'}</p>
+                                <p className="text-xs text-slate-500">Age {profile?.age || '--'}</p>
+                            </div>
                         </div>
-                        <div>
-                            <p className="text-sm font-bold text-slate-800">{profile?.full_name || 'Patient'}</p>
-                            <p className="text-xs text-slate-500">Age {profile?.age || '--'}</p>
-                        </div>
+                        <button
+                            onClick={async () => {
+                                await signOut();
+                                navigate('/login');
+                            }}
+                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Log Out"
+                        >
+                            <LogOut size={18} />
+                        </button>
                     </div>
-                    <button
-                        onClick={async () => {
-                            await signOut();
-                            navigate('/login');
-                        }}
-                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Log Out"
-                    >
-                        <LogOut size={18} />
-                    </button>
+                    <div className="text-[10px] text-slate-400 text-center font-medium opacity-60">
+                        &copy; 2026 Mobivia. All rights reserved.
+                    </div>
                 </div>
             </aside>
 
