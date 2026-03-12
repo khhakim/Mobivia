@@ -252,6 +252,12 @@ export default function Login() {
                     </div>
                 </div>
             </div>
+            {/* Persistent Copyright Tag */}
+            <div className="absolute bottom-4 left-0 right-0 text-center pointer-events-none z-20">
+                <p className="text-[10px] text-slate-400 font-medium opacity-60">
+                    &copy; 2026 Mobivia. All rights reserved.
+                </p>
+            </div>
         </div>
     );
 }

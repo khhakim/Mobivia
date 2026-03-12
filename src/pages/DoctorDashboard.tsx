@@ -766,7 +766,7 @@ export default function DoctorDashboard() {
                         <span className="text-sm">Settings</span>
                     </button>
 
-                    <div className="mt-8 border-t border-slate-100 pt-4 px-3">
+                    <div className="mt-8 border-t border-slate-100 pt-4 px-3 flex flex-col space-y-4">
                         <button
                             onClick={async () => {
                                 await signOut();
@@ -777,6 +777,9 @@ export default function DoctorDashboard() {
                             <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
                             <span className="text-sm">Log Out</span>
                         </button>
+                        <div className="text-[10px] text-slate-400 text-center font-medium opacity-60">
+                            &copy; 2026 Mobivia. All rights reserved.
+                        </div>
                     </div>
                 </nav>
             </aside>
